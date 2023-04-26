@@ -8,33 +8,18 @@
 #include <nimble-ball-presentation/render.h>
 #include <nimble-ball-simulation/nimble_ball_simulation_vm.h>
 #include <rectify/rectify.h>
+#include <sdl-render/gamepad.h>
 
 clog_config g_clog;
 
-static int checkSdlEvent(void)
+static NlPlayerInput gamepadToPlayerInput(const SrGamepad* pad)
 {
-    SDL_Event event;
-    int quit = 0;
-
-    if (SDL_PollEvent(&event)) {
-
-        switch (event.type) {
-            case SDL_QUIT:
-                quit = 1;
-                break;
-            case SDL_KEYDOWN:
-                if (event.key.keysym.sym == SDLK_ESCAPE) {
-                    quit = 1;
-                }
-                break;
-            case SDL_KEYUP:
-                break;
-            case SDL_TEXTINPUT:
-                break;
-        }
-    }
-
-    return quit;
+    NlPlayerInput playerInput;
+    playerInput.input.inGameInput.horizontalAxis = pad->horizontalAxis;
+    playerInput.input.inGameInput.verticalAxis = pad->verticalAxis;
+    playerInput.input.inGameInput.passButton = pad->a;
+    playerInput.inputType = NlPlayerInputTypeInGame;
+    return playerInput;
 }
 
 int main(int argc, char* argv[])
@@ -88,13 +73,20 @@ int main(int argc, char* argv[])
                 initialStepId);
 
     StepId stepId = initialStepId;
+
+    SrGamepad gamepad;
+
+    srGamepadInit(&gamepad);
+
     while (1) {
         rectifyUpdate(&rectify);
-        NlPlayerInput gameInput;
+        int wantsToQuit = srGamepadPoll(&gamepad);
+        if (wantsToQuit) {
+            break;
+        }
+
+        NlPlayerInput gameInput = gamepadToPlayerInput(&gamepad);
         gameInput.participantId = 2;
-        gameInput.input.inGameInput.horizontalAxis = -33;
-        gameInput.input.inGameInput.verticalAxis = 20;
-        gameInput.inputType = NlPlayerInputTypeInGame;
 
         TransmuteInput transmuteInput;
         TransmuteParticipantInput participantInputs[1];
@@ -113,10 +105,7 @@ int main(int argc, char* argv[])
         const NlGame* predictedGame = (NlGame*) predictedTransmuteState.state;
 
         nlRenderUpdate(&render, authoritativeGame, predictedGame);
-        int wantsToQuit = checkSdlEvent();
-        if (wantsToQuit) {
-            break;
-        }
+
     }
 
     nlRenderClose(&render);
