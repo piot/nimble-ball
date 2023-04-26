@@ -1,0 +1,16 @@
+depsversion = "0.0.0"
+
+name = "piot/nimble-ball"
+version = "0.0.0"
+
+[[dependencies]]
+name = "piot/nimble-ball-simulation"
+version = "*"
+
+[[dependencies]]
+name = "piot/nimble-ball-presentation"
+version = "*"
+
+[[dependencies]]
+name = "piot/rectify-c"
+version = "*"
