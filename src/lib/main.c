@@ -74,27 +74,34 @@ int main(int argc, char* argv[])
 
     StepId stepId = initialStepId;
 
-    SrGamepad gamepad;
+    SrGamepad gamepads[2];
 
-    srGamepadInit(&gamepad);
+    srGamepadInit(&gamepads[0]);
+    srGamepadInit(&gamepads[1]);
 
     while (1) {
         rectifyUpdate(&rectify);
-        int wantsToQuit = srGamepadPoll(&gamepad);
+        int wantsToQuit = srGamepadPoll(gamepads, 2);
         if (wantsToQuit) {
             break;
         }
 
-        NlPlayerInput gameInput = gamepadToPlayerInput(&gamepad);
-        gameInput.participantId = 2;
+        NlPlayerInput gameInput1 = gamepadToPlayerInput(&gamepads[0]);
+        gameInput1.participantId = 2;
+        NlPlayerInput gameInput2 = gamepadToPlayerInput(&gamepads[1]);
+        gameInput2.participantId = 5;
 
         TransmuteInput transmuteInput;
-        TransmuteParticipantInput participantInputs[1];
-        participantInputs[0].input = &gameInput;
-        participantInputs[0].octetSize = sizeof(gameInput);
+        TransmuteParticipantInput participantInputs[2];
+        participantInputs[0].input = &gameInput1;
+        participantInputs[0].octetSize = sizeof(gameInput1);
+
+
+        participantInputs[1].input = &gameInput2;
+        participantInputs[1].octetSize = sizeof(gameInput1);
 
         transmuteInput.participantInputs = participantInputs;
-        transmuteInput.participantCount = 1;
+        transmuteInput.participantCount = 2;
 
         rectifyAddAuthoritativeStep(&rectify, &transmuteInput, stepId++);
 
@@ -104,7 +111,9 @@ int main(int argc, char* argv[])
         TransmuteState predictedTransmuteState = transmuteVmGetState(&rectify.predicted.transmuteVm);
         const NlGame* predictedGame = (NlGame*) predictedTransmuteState.state;
 
-        nlRenderUpdate(&render, authoritativeGame, predictedGame);
+        NlRenderStats stats;
+        stats.predictedTickId = rectify.predicted.stepId;
+        nlRenderUpdate(&render, authoritativeGame, predictedGame, stats);
 
     }
 

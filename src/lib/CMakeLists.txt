@@ -34,7 +34,8 @@ add_executable(nimble_ball
 
 find_package(SDL2 REQUIRED COMPONENTS SDL2)
 find_package(SDL2_image REQUIRED COMPONENTS SDL2_image>=2.0.0)
-target_link_libraries(nimble_ball PUBLIC SDL2::SDL2 SDL2_image::SDL2_image)
+find_package(SDL2_ttf REQUIRED COMPONENTS SDL2_ttf>=2.20.0)
+target_link_libraries(nimble_ball PUBLIC SDL2::SDL2 SDL2_image::SDL2_image SDL2_ttf::SDL2_ttf)
 
 if (WIN32)
 else ()
