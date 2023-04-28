@@ -4,6 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 #include "frontend.h"
 #include "frontend_render.h"
+#include "nimble-steps-serialize/out_serialize.h"
+#include "nimble-steps-serialize/serialize.h"
 #include "rectify/rectify.h"
 #include <clog/console.h>
 #include <imprint/default_setup.h>
@@ -104,7 +106,7 @@ typedef struct NimbleEngineClientSetup {
     struct ImprintAllocatorWithFree* blobMemory;
     TransmuteVm authoritative;
     TransmuteVm predicted;
-    size_t maximumInputOctetSize;
+    size_t maximumInputBufferOctetSize;
     size_t maximumPlayerCount;
     Clog log;
 } NimbleEngineClientSetup;
@@ -120,7 +122,7 @@ typedef struct NimbleEngineClient {
     NimbleEngineClientPhase phase;
     TransmuteVm authoritative;
     TransmuteVm predicted;
-    size_t maximumInputOctetSize;
+    size_t maximumInputBufferOctetSize;
     size_t maximumPlayerCount;
     Clog log;
 } NimbleEngineClient;
@@ -137,6 +139,8 @@ typedef struct NimbleEngineClientGameJoinOptions {
 void nimbleEngineClientInit(NimbleEngineClient* self, NimbleEngineClientSetup setup);
 void nimbleEngineClientRequestJoin(NimbleEngineClient* self, NimbleEngineClientGameJoinOptions options);
 void nimbleEngineClientUpdate(NimbleEngineClient* self);
+bool nimbleEngineClientMustAddPredictedInput(const NimbleEngineClient* self);
+int nimbleEngineClientAddPredictedInput(NimbleEngineClient* self, const TransmuteInput* input);
 
 void nimbleEngineClientInit(NimbleEngineClient* self, NimbleEngineClientSetup setup)
 {
@@ -151,7 +155,7 @@ void nimbleEngineClientInit(NimbleEngineClient* self, NimbleEngineClientSetup se
     self->phase = NimbleEngineClientPhaseWaitingForInitialGameState;
     self->authoritative = setup.authoritative;
     self->predicted = setup.predicted;
-    self->maximumInputOctetSize = setup.maximumInputOctetSize;
+    self->maximumInputBufferOctetSize = setup.maximumInputBufferOctetSize;
     self->log = setup.log;
     self->maximumPlayerCount = setup.maximumPlayerCount;
     nimbleClientRealizeInit(&self->nimbleClient, &serializeSetup);
@@ -172,13 +176,52 @@ void nimbleEngineClientRequestJoin(NimbleEngineClient* self, NimbleEngineClientG
     nimbleClientRealizeJoinGame(&self->nimbleClient, joinOptions);
 }
 
+bool nimbleEngineClientMustAddPredictedInput(const NimbleEngineClient* self)
+{
+    bool allowedToAdd = nbsStepsAllowedToAdd(&self->nimbleClient.client.outSteps);
+    if (!allowedToAdd) {
+        return false;
+    }
+
+    // TODO: Add more logic here
+    return true;
+}
+
+int nimbleEngineClientAddPredictedInput(NimbleEngineClient* self, const TransmuteInput* input)
+{
+    NimbleStepsOutSerializeLocalParticipants data;
+
+    for (size_t i = 0; i < input->participantCount; ++i) {
+        uint8_t participantId = input->participantInputs[i].participantId;
+        if (participantId == 0) {
+            CLOG_ERROR("participantID zero is reserved")
+        }
+        data.participants[i].participantIndex = participantId;
+        data.participants[i].payload = input->participantInputs[i].input;
+        data.participants[i].payloadCount = input->participantInputs[i].octetSize;
+    }
+
+    data.participantCount = input->participantCount;
+
+    uint8_t buf[120];
+
+    int octetCount = nbsStepsOutSerializeStep(&data, buf, 120);
+    if (octetCount < 0) {
+        CLOG_ERROR("seerAddPredictedSteps: could not serialize")
+        return octetCount;
+    }
+
+    return nbsStepsWrite(&self->nimbleClient.client.outSteps, self->nimbleClient.client.outSteps.expectedWriteId, buf,
+                         octetCount);
+}
+
 static void joinGameState(NimbleEngineClient* self)
 {
     self->phase = NimbleEngineClientPhaseInGame;
     // TransmuteVm authoritativeVm, TransmuteVm predictVm, RectifySetup setup, TransmuteState state, StepId stepId)
     RectifySetup rectifySetup;
     rectifySetup.allocator = self->nimbleClient.settings.memory;
-    rectifySetup.maxInputOctetSize = self->maximumInputOctetSize;
+    rectifySetup.maxInputBufferOctetSize = self->maximumInputBufferOctetSize;
     rectifySetup.maxPlayerCount = self->maximumPlayerCount;
     rectifySetup.log = self->log;
 
@@ -344,7 +387,7 @@ static void startJoining(NlApp* app, NlFrontend* frontend, ImprintAllocator* all
 
     setup.authoritative = app->authoritative.transmuteVm;
     setup.predicted = app->predicted.transmuteVm;
-    setup.maximumInputOctetSize = 120;
+    setup.maximumInputBufferOctetSize = 120 * 40;
     setup.maximumPlayerCount = 16;
 
     Clog nimbleEngineClientLog;
@@ -427,9 +470,25 @@ int main(int argc, char* argv[])
                 break;
 
             case NlAppPhaseNetwork: {
-                size_t targetFps;
-
                 nimbleEngineClientUpdate(&app.nimbleEngineClient);
+                if (app.nimbleEngineClient.phase == NimbleEngineClientPhaseInGame && nimbleEngineClientMustAddPredictedInput(&app.nimbleEngineClient)) {
+                    NlPlayerInput input = gamepadToPlayerInput(&gamepads[0]);
+
+
+                    uint8_t participantId = app.nimbleEngineClient.nimbleClient.client.localParticipantLookup[0].participantId;
+                    CLOG_VERBOSE("ParticipantId: %02X", participantId);
+
+                    TransmuteParticipantInput firstParticipant;
+                    firstParticipant.input = &input;
+                    firstParticipant.octetSize = sizeof(input);
+                    firstParticipant.participantId = participantId;
+
+                    TransmuteInput transmuteInput;
+                    transmuteInput.participantInputs = &firstParticipant;
+                    transmuteInput.participantCount = 1;
+
+                    nimbleEngineClientAddPredictedInput(&app.nimbleEngineClient, &transmuteInput);
+                }
 
                 if (app.isHosting) {
                     int connectionId;
