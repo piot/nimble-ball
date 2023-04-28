@@ -25,10 +25,14 @@ file(GLOB_RECURSE deps_src FOLLOW_SYMLINKS
         "${DEPS}*/*/src/lib/*.c"
         )
 
+file(GLOB src FOLLOW_SYMLINKS
+        "*.c"
+        )
+
 message("something ${example_src}")
 
 add_executable(nimble_ball
-        main.c
+        ${src}
         ${deps_src}
         )
 

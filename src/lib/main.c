@@ -2,7 +2,8 @@
  *  Copyright (c) Peter Bjorklund. All rights reserved.
  *  Licensed under the MIT License. See LICENSE in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-#include <SDL2/SDL.h>
+#include "frontend.h"
+#include "frontend_render.h"
 #include <clog/console.h>
 #include <imprint/default_setup.h>
 #include <nimble-ball-presentation/render.h>
@@ -22,6 +23,28 @@ static NlPlayerInput gamepadToPlayerInput(const SrGamepad* pad)
     return playerInput;
 }
 
+typedef struct NlCombinedRender {
+    NlFrontendRender frontendRender;
+    NlRender inGame;
+    NlFrontend frontend;
+} NlCombinedRender;
+
+typedef enum NlAppPhase {
+    NlAppPhaseIdle,
+    NlAppPhaseTryingToHost,
+    NlAppPhaseTryingToJoin,
+} NlAppPhase;
+
+typedef struct NlAppState {
+    NlAppPhase phase;
+} NlAppState;
+
+static void renderCallback(void* _self, SrWindow* window)
+{
+    NlCombinedRender* combinedRender = (NlCombinedRender*) _self;
+    nlFrontendRenderUpdate(&combinedRender->frontendRender, &combinedRender->frontend);
+}
+
 int main(int argc, char* argv[])
 {
     (void) argc;
@@ -33,89 +56,53 @@ int main(int argc, char* argv[])
     ImprintDefaultSetup imprintDefaultSetup;
     imprintDefaultSetupInit(&imprintDefaultSetup, 5 * 1024 * 1024);
 
-    NlRender render;
+    NlCombinedRender combinedRender;
 
-    nlRenderInit(&render);
+    nlRenderInit(&combinedRender.inGame);
 
-    NlSimulationVm authoritativeVm;
-    Clog authSubLog;
-    authSubLog.constantPrefix = "NimbleBallAuth";
-    authSubLog.config = &g_clog;
-    nlSimulationVmInit(&authoritativeVm, authSubLog);
+    nlFrontendInit(&combinedRender.frontend);
 
-    NlSimulationVm predictedVm;
-    Clog predictedSubLog;
-    predictedSubLog.constantPrefix = "NimbleBallPredicted";
-    predictedSubLog.config = &g_clog;
-    nlSimulationVmInit(&predictedVm, predictedSubLog);
-
-    RectifySetup rectifySetup;
-    Clog rectifySubLog;
-    rectifySubLog.constantPrefix = "Rectify";
-    rectifySubLog.config = &g_clog;
-    rectifySetup.log = rectifySubLog;
-    rectifySetup.maxPlayerCount = 8;
-    rectifySetup.maxInputOctetSize = 120;
-    rectifySetup.allocator = &imprintDefaultSetup.slabAllocator.info.allocator;
-
-    Rectify rectify;
-
-    StepId initialStepId = 0;
-
-    NlGame authoritativeInitialGameState;
-    nlGameInit(&authoritativeInitialGameState);
-
-    TransmuteState initialAuthoritativeState;
-    initialAuthoritativeState.state = &authoritativeInitialGameState;
-    initialAuthoritativeState.octetSize = sizeof(authoritativeInitialGameState);
-
-    rectifyInit(&rectify, authoritativeVm.transmuteVm, predictedVm.transmuteVm, rectifySetup, initialAuthoritativeState,
-                initialStepId);
-
-    StepId stepId = initialStepId;
+    nlFrontendRenderInit(&combinedRender.frontendRender, &combinedRender.inGame.window, combinedRender.inGame.font);
 
     SrGamepad gamepads[2];
 
     srGamepadInit(&gamepads[0]);
-    srGamepadInit(&gamepads[1]);
+
+    NlAppState appState;
+    appState.phase = NlAppPhaseIdle;
 
     while (1) {
-        rectifyUpdate(&rectify);
         int wantsToQuit = srGamepadPoll(gamepads, 2);
         if (wantsToQuit) {
             break;
         }
 
-        NlPlayerInput gameInput1 = gamepadToPlayerInput(&gamepads[0]);
-        gameInput1.participantId = 2;
-        NlPlayerInput gameInput2 = gamepadToPlayerInput(&gamepads[1]);
-        gameInput2.participantId = 5;
+        nlFrontendHandleInput(&combinedRender.frontend, &gamepads[0]);
+        switch (appState.phase) {
+            case NlAppPhaseIdle:
+                switch (combinedRender.frontend.mainMenuSelected) {
+                    case NlFrontendMenuSelectJoin:
+                        CLOG_DEBUG("Join a game")
+                        appState.phase = NlAppPhaseTryingToJoin;
+                        combinedRender.frontend.phase = NlFrontendPhaseJoining;
+                        break;
+                    case NlFrontendMenuSelectHost:
+                        CLOG_DEBUG("Host a game")
+                        appState.phase = NlAppPhaseTryingToHost;
+                        combinedRender.frontend.phase = NlFrontendPhaseHosting;
+                        break;
+                    case NlFrontendMenuSelectUnknown:
+                        break;
+                }
+                break;
+            case NlAppPhaseTryingToHost:
+                break;
+            case NlAppPhaseTryingToJoin:
+                break;
+        }
 
-        TransmuteInput transmuteInput;
-        TransmuteParticipantInput participantInputs[2];
-        participantInputs[0].input = &gameInput1;
-        participantInputs[0].octetSize = sizeof(gameInput1);
-
-
-        participantInputs[1].input = &gameInput2;
-        participantInputs[1].octetSize = sizeof(gameInput1);
-
-        transmuteInput.participantInputs = participantInputs;
-        transmuteInput.participantCount = 2;
-
-        rectifyAddAuthoritativeStep(&rectify, &transmuteInput, stepId++);
-
-        TransmuteState authoritativeTransmuteState = transmuteVmGetState(&rectify.authoritative.transmuteVm);
-        const NlGame* authoritativeGame = (NlGame*) authoritativeTransmuteState.state;
-
-        TransmuteState predictedTransmuteState = transmuteVmGetState(&rectify.predicted.transmuteVm);
-        const NlGame* predictedGame = (NlGame*) predictedTransmuteState.state;
-
-        NlRenderStats stats;
-        stats.predictedTickId = rectify.predicted.stepId;
-        nlRenderUpdate(&render, authoritativeGame, predictedGame, stats);
-
+        srWindowRender(&combinedRender.inGame.window, 0x115511, &combinedRender, renderCallback);
     }
 
-    nlRenderClose(&render);
+    nlRenderClose(&combinedRender.inGame);
 }
