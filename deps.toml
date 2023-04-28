@@ -14,3 +14,24 @@ version = "*"
 [[dependencies]]
 name = "piot/rectify-c"
 version = "*"
+
+
+[[dependencies]]
+name = "piot/udp-server-c"
+version = "*"
+
+[[dependencies]]
+name = "piot/udp-client-c"
+version = "*"
+
+[[dependencies]]
+name = "piot/hazy-c"
+version = "*"
+
+[[dependencies]]
+name = "piot/nimble-server-lib"
+version = "*"
+
+[[dependencies]]
+name = "piot/nimble-client-c"
+version = "*"

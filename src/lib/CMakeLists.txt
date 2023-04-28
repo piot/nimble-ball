@@ -23,6 +23,7 @@ set(DEPS ../../deps/)
 
 file(GLOB_RECURSE deps_src FOLLOW_SYMLINKS
         "${DEPS}*/*/src/lib/*.c"
+        "${DEPS}*/*/src/platform/posix/*.c"
         )
 
 file(GLOB src FOLLOW_SYMLINKS
@@ -63,7 +64,20 @@ target_include_directories(nimble_ball PRIVATE ${DEPS}piot/assent-c/src/include)
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/seer-c/src/include)
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/flood-c/src/include)
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/discoid-c/src/include)
+target_include_directories(nimble_ball PRIVATE ${DEPS}piot/udp-server-c/src/include)
+target_include_directories(nimble_ball PRIVATE ${DEPS}piot/udp-client-c/src/include)
+target_include_directories(nimble_ball PRIVATE ${DEPS}piot/hazy-c/src/include)
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/basal-c/src/include)
+target_include_directories(nimble_ball PRIVATE ${DEPS}piot/monotonic-time-c/src/include)
+target_include_directories(nimble_ball PRIVATE ${DEPS}piot/udp-transport/src/include)
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/nimble-ball-simulation/src/include)
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/nimble-ball-presentation/src/include)
+target_include_directories(nimble_ball PRIVATE ${DEPS}piot/nimble-serialize-c/src/include)
+target_include_directories(nimble_ball PRIVATE ${DEPS}piot/ordered-datagram-c/src/include)
+target_include_directories(nimble_ball PRIVATE ${DEPS}piot/blob-stream/src/include)
+target_include_directories(nimble_ball PRIVATE ${DEPS}piot/stats-c/src/include)
+target_include_directories(nimble_ball PRIVATE ${DEPS}piot/bit-array/src/include)
+target_include_directories(nimble_ball PRIVATE ${DEPS}piot/nimble-server-lib/src/include)
+target_include_directories(nimble_ball PRIVATE ${DEPS}piot/nimble-client-c/src/include)
+
 target_include_directories(nimble_ball PRIVATE ../include)
