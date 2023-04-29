@@ -5,7 +5,6 @@
 #include "frontend.h"
 #include "frontend_render.h"
 #include "nimble-steps-serialize/out_serialize.h"
-#include "nimble-steps-serialize/serialize.h"
 #include "rectify/rectify.h"
 #include <clog/console.h>
 #include <imprint/default_setup.h>
@@ -237,6 +236,29 @@ static void joinGameState(NimbleEngineClient* self)
                 joinedGameState->stepId);
 }
 
+
+static void tickInGame(NimbleEngineClient* self)
+{
+    uint8_t inputBuf[512];
+    StepId authoritativeTickId;
+
+    if (self->nimbleClient.client.authoritativeStepsFromServer.stepsCount == 0) {
+        rectifyUpdate(&self->rectify);
+        return;
+    }
+
+    int octetCount = nimbleClientReadStep(&self->nimbleClient.client, inputBuf, 512, &authoritativeTickId);
+    if (octetCount < 0) {
+        CLOG_C_ERROR(&self->log, " could not read");
+    }
+
+    int errorCode = rectifyAddAuthoritativeStepRaw(&self->rectify, inputBuf, octetCount, authoritativeTickId);
+    if (errorCode < 0) {
+        CLOG_C_ERROR(&self->log, "could not go on, can not add authoritative steps")
+    }
+    rectifyUpdate(&self->rectify);
+}
+
 void nimbleEngineClientUpdate(NimbleEngineClient* self)
 {
     size_t targetFps;
@@ -255,7 +277,9 @@ void nimbleEngineClientUpdate(NimbleEngineClient* self)
                 case NimbleClientRealizeStateCleared:
                     break;
             }
+            break;
         case NimbleEngineClientPhaseInGame:
+            tickInGame(self);
             break;
     }
 }
@@ -498,7 +522,6 @@ int main(int argc, char* argv[])
 
                     uint8_t participantId = app.nimbleEngineClient.nimbleClient.client.localParticipantLookup[0]
                                                 .participantId;
-                    CLOG_VERBOSE("ParticipantId: %02X", participantId);
 
                     TransmuteParticipantInput firstParticipant;
                     firstParticipant.input = &input;
@@ -527,6 +550,13 @@ int main(int argc, char* argv[])
                         if (errorCode < 0) {
                             CLOG_ERROR("can not feed server")
                         }
+                    }
+
+                    if (nbdServerMustProvideGameState(&app.nimbleServer)) {
+                        StepId outStepId;
+                        TransmuteState authoritativeState = assentGetState(&app.nimbleEngineClient.rectify.authoritative, &outStepId);
+                        CLOG_ASSERT(authoritativeState.octetSize == sizeof(NlGame), "illegal authoritative state");
+                        nbdServerSetGameState(&app.nimbleServer, authoritativeState.state, authoritativeState.octetSize, outStepId);
                     }
                 }
             }
