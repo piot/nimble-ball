@@ -106,8 +106,8 @@ typedef struct NimbleEngineClientSetup {
     struct ImprintAllocatorWithFree* blobMemory;
     TransmuteVm authoritative;
     TransmuteVm predicted;
-    size_t maximumInputBufferOctetSize;
-    size_t maximumPlayerCount;
+    size_t maximumSingleParticipantStepOctetCount;
+    size_t maximumParticipantCount;
     Clog log;
 } NimbleEngineClientSetup;
 
@@ -122,8 +122,8 @@ typedef struct NimbleEngineClient {
     NimbleEngineClientPhase phase;
     TransmuteVm authoritative;
     TransmuteVm predicted;
-    size_t maximumInputBufferOctetSize;
-    size_t maximumPlayerCount;
+    size_t maxStepOctetSizeForSingleParticipant;
+    size_t maximumParticipantCount;
     Clog log;
 } NimbleEngineClient;
 
@@ -148,17 +148,20 @@ void nimbleEngineClientInit(NimbleEngineClient* self, NimbleEngineClientSetup se
         CLOG_ERROR("not same transmuteVmVersion %d.%d.%d", setup.predicted.version.major, setup.predicted.version.minor,
                    setup.predicted.version.patch)
     }
-    NimbleClientRealizeSettings serializeSetup;
-    serializeSetup.memory = setup.memory;
-    serializeSetup.blobMemory = setup.blobMemory;
-    serializeSetup.transport = setup.transport;
+    NimbleClientRealizeSettings realizeSetup;
+    realizeSetup.memory = setup.memory;
+    realizeSetup.blobMemory = setup.blobMemory;
+    realizeSetup.transport = setup.transport;
+    realizeSetup.maximumSingleParticipantStepOctetCount = setup.maximumSingleParticipantStepOctetCount;
+    realizeSetup.maximumNumberOfParticipants = setup.maximumParticipantCount;
+    realizeSetup.log = setup.log;
     self->phase = NimbleEngineClientPhaseWaitingForInitialGameState;
     self->authoritative = setup.authoritative;
     self->predicted = setup.predicted;
-    self->maximumInputBufferOctetSize = setup.maximumInputBufferOctetSize;
+    self->maxStepOctetSizeForSingleParticipant = setup.maximumSingleParticipantStepOctetCount;
     self->log = setup.log;
-    self->maximumPlayerCount = setup.maximumPlayerCount;
-    nimbleClientRealizeInit(&self->nimbleClient, &serializeSetup);
+    self->maximumParticipantCount = setup.maximumParticipantCount;
+    nimbleClientRealizeInit(&self->nimbleClient, &realizeSetup);
 }
 
 void nimbleEngineClientRequestJoin(NimbleEngineClient* self, NimbleEngineClientGameJoinOptions options)
@@ -221,8 +224,8 @@ static void joinGameState(NimbleEngineClient* self)
     // TransmuteVm authoritativeVm, TransmuteVm predictVm, RectifySetup setup, TransmuteState state, StepId stepId)
     RectifySetup rectifySetup;
     rectifySetup.allocator = self->nimbleClient.settings.memory;
-    rectifySetup.maxInputBufferOctetSize = self->maximumInputBufferOctetSize;
-    rectifySetup.maxPlayerCount = self->maximumPlayerCount;
+    rectifySetup.maxStepOctetSizeForSingleParticipant = self->maxStepOctetSizeForSingleParticipant;
+    rectifySetup.maxPlayerCount = self->maximumParticipantCount;
     rectifySetup.log = self->log;
 
     const NimbleClientGameState* joinedGameState = &self->nimbleClient.client.joinedGameState;
@@ -262,7 +265,7 @@ static NlPlayerInput gamepadToPlayerInput(const SrGamepad* pad)
     NlPlayerInput playerInput;
     playerInput.input.inGameInput.horizontalAxis = pad->horizontalAxis;
     playerInput.input.inGameInput.verticalAxis = pad->verticalAxis;
-    playerInput.input.inGameInput.passButton = pad->a;
+    playerInput.input.inGameInput.buttons = pad->a ? 0x01 : 0x00;
     playerInput.inputType = NlPlayerInputTypeInGame;
     return playerInput;
 }
@@ -337,7 +340,25 @@ static void startHosting(NlApp* app, NlFrontend* frontend, ImprintAllocator* all
         app->authoritative.transmuteVm.version.patch,
     };
 
-    errorCode = nbdServerInit(&app->nimbleServer, serverReportTransmuteVmVersion, allocator, allocatorWithFree);
+    const size_t maxConnectionCount = 4;
+    const size_t maxParticipantCount = maxConnectionCount * 2;
+    const size_t maxSingleParticipantStepOctetCount = sizeof(NlPlayerInput);
+
+    Clog serverLog;
+    serverLog.config = &g_clog;
+    serverLog.constantPrefix = "NbdServer";
+
+    NbdServerSetup serverSetup;
+    serverSetup.maxSingleParticipantStepOctetCount =  maxSingleParticipantStepOctetCount;
+    serverSetup.maxParticipantCount = maxParticipantCount;
+    serverSetup.maxConnectionCount = maxConnectionCount;
+    serverSetup.maxParticipantCountForEachConnection = 2;
+    serverSetup.maxGameStateOctetCount = sizeof(NlGame);
+    serverSetup.memory = allocator;
+    serverSetup.blobAllocator = allocatorWithFree;
+    serverSetup.applicationVersion = serverReportTransmuteVmVersion;
+    serverSetup.log = serverLog;
+    errorCode = nbdServerInit(&app->nimbleServer, serverSetup);
     if (errorCode < 0) {
         CLOG_ERROR("could not initialize nimble server %d", errorCode)
     }
@@ -387,8 +408,8 @@ static void startJoining(NlApp* app, NlFrontend* frontend, ImprintAllocator* all
 
     setup.authoritative = app->authoritative.transmuteVm;
     setup.predicted = app->predicted.transmuteVm;
-    setup.maximumInputBufferOctetSize = 120 * 40;
-    setup.maximumPlayerCount = 16;
+    setup.maximumSingleParticipantStepOctetCount = sizeof(NlPlayerInput);
+    setup.maximumParticipantCount = 8; // TODO: the participant count should come from the server
 
     Clog nimbleEngineClientLog;
     nimbleEngineClientLog.config = &g_clog;
@@ -416,7 +437,7 @@ int main(int argc, char* argv[])
     CLOG_VERBOSE("Nimble Ball start!")
 
     ImprintDefaultSetup imprintDefaultSetup;
-    imprintDefaultSetupInit(&imprintDefaultSetup, 5 * 1024 * 1024);
+    imprintDefaultSetupInit(&imprintDefaultSetup, 1 * 1024 * 1024);
 
     NlCombinedRender combinedRender;
     nlFrontendInit(&combinedRender.frontend);
@@ -471,11 +492,12 @@ int main(int argc, char* argv[])
 
             case NlAppPhaseNetwork: {
                 nimbleEngineClientUpdate(&app.nimbleEngineClient);
-                if (app.nimbleEngineClient.phase == NimbleEngineClientPhaseInGame && nimbleEngineClientMustAddPredictedInput(&app.nimbleEngineClient)) {
+                if (app.nimbleEngineClient.phase == NimbleEngineClientPhaseInGame &&
+                    nimbleEngineClientMustAddPredictedInput(&app.nimbleEngineClient)) {
                     NlPlayerInput input = gamepadToPlayerInput(&gamepads[0]);
 
-
-                    uint8_t participantId = app.nimbleEngineClient.nimbleClient.client.localParticipantLookup[0].participantId;
+                    uint8_t participantId = app.nimbleEngineClient.nimbleClient.client.localParticipantLookup[0]
+                                                .participantId;
                     CLOG_VERBOSE("ParticipantId: %02X", participantId);
 
                     TransmuteParticipantInput firstParticipant;
