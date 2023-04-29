@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 #include "frontend.h"
 #include "frontend_render.h"
+#include "nimble-engine-client/client.h"
 #include "nimble-steps-serialize/out_serialize.h"
 #include "rectify/rectify.h"
 #include <clog/console.h>
@@ -99,190 +100,6 @@ octetCount)
 }
 */
 
-typedef struct NimbleEngineClientSetup {
-    UdpTransportInOut transport;
-    struct ImprintAllocator* memory;
-    struct ImprintAllocatorWithFree* blobMemory;
-    TransmuteVm authoritative;
-    TransmuteVm predicted;
-    size_t maximumSingleParticipantStepOctetCount;
-    size_t maximumParticipantCount;
-    Clog log;
-} NimbleEngineClientSetup;
-
-typedef enum NimbleEngineClientPhase {
-    NimbleEngineClientPhaseWaitingForInitialGameState,
-    NimbleEngineClientPhaseInGame,
-} NimbleEngineClientPhase;
-
-typedef struct NimbleEngineClient {
-    Rectify rectify;
-    NimbleClientRealize nimbleClient;
-    NimbleEngineClientPhase phase;
-    TransmuteVm authoritative;
-    TransmuteVm predicted;
-    size_t maxStepOctetSizeForSingleParticipant;
-    size_t maximumParticipantCount;
-    Clog log;
-} NimbleEngineClient;
-
-typedef struct NimbleEngineClientPlayerJoinOptions {
-    uint8_t localIndex;
-} NimbleEngineClientPlayerJoinOptions;
-
-typedef struct NimbleEngineClientGameJoinOptions {
-    NimbleEngineClientPlayerJoinOptions players[8];
-    size_t playerCount;
-} NimbleEngineClientGameJoinOptions;
-
-void nimbleEngineClientInit(NimbleEngineClient* self, NimbleEngineClientSetup setup);
-void nimbleEngineClientRequestJoin(NimbleEngineClient* self, NimbleEngineClientGameJoinOptions options);
-void nimbleEngineClientUpdate(NimbleEngineClient* self);
-bool nimbleEngineClientMustAddPredictedInput(const NimbleEngineClient* self);
-int nimbleEngineClientAddPredictedInput(NimbleEngineClient* self, const TransmuteInput* input);
-
-void nimbleEngineClientInit(NimbleEngineClient* self, NimbleEngineClientSetup setup)
-{
-    if (!transmuteVmVersionIsEqual(&setup.predicted.version, &setup.authoritative.version)) {
-        CLOG_ERROR("not same transmuteVmVersion %d.%d.%d", setup.predicted.version.major, setup.predicted.version.minor,
-                   setup.predicted.version.patch)
-    }
-    NimbleClientRealizeSettings realizeSetup;
-    realizeSetup.memory = setup.memory;
-    realizeSetup.blobMemory = setup.blobMemory;
-    realizeSetup.transport = setup.transport;
-    realizeSetup.maximumSingleParticipantStepOctetCount = setup.maximumSingleParticipantStepOctetCount;
-    realizeSetup.maximumNumberOfParticipants = setup.maximumParticipantCount;
-    realizeSetup.log = setup.log;
-    self->phase = NimbleEngineClientPhaseWaitingForInitialGameState;
-    self->authoritative = setup.authoritative;
-    self->predicted = setup.predicted;
-    self->maxStepOctetSizeForSingleParticipant = setup.maximumSingleParticipantStepOctetCount;
-    self->log = setup.log;
-    self->maximumParticipantCount = setup.maximumParticipantCount;
-    nimbleClientRealizeInit(&self->nimbleClient, &realizeSetup);
-}
-
-void nimbleEngineClientRequestJoin(NimbleEngineClient* self, NimbleEngineClientGameJoinOptions options)
-{
-    NimbleSerializeGameJoinOptions joinOptions;
-
-    for (size_t i = 0; i < options.playerCount; ++i) {
-        joinOptions.players[i].localIndex = options.players[i].localIndex;
-    }
-    joinOptions.playerCount = options.playerCount;
-
-    NimbleSerializeVersion applicationVersion = {self->authoritative.version.major, self->authoritative.version.minor,
-                                                 self->authoritative.version.patch};
-    joinOptions.applicationVersion = applicationVersion;
-    nimbleClientRealizeJoinGame(&self->nimbleClient, joinOptions);
-}
-
-bool nimbleEngineClientMustAddPredictedInput(const NimbleEngineClient* self)
-{
-    bool allowedToAdd = nbsStepsAllowedToAdd(&self->nimbleClient.client.outSteps);
-    if (!allowedToAdd) {
-        return false;
-    }
-
-    // TODO: Add more logic here
-    return true;
-}
-
-int nimbleEngineClientAddPredictedInput(NimbleEngineClient* self, const TransmuteInput* input)
-{
-    NimbleStepsOutSerializeLocalParticipants data;
-
-    for (size_t i = 0; i < input->participantCount; ++i) {
-        uint8_t participantId = input->participantInputs[i].participantId;
-        if (participantId == 0) {
-            CLOG_ERROR("participantID zero is reserved")
-        }
-        data.participants[i].participantIndex = participantId;
-        data.participants[i].payload = input->participantInputs[i].input;
-        data.participants[i].payloadCount = input->participantInputs[i].octetSize;
-    }
-
-    data.participantCount = input->participantCount;
-
-    uint8_t buf[120];
-
-    int octetCount = nbsStepsOutSerializeStep(&data, buf, 120);
-    if (octetCount < 0) {
-        CLOG_ERROR("seerAddPredictedSteps: could not serialize")
-        return octetCount;
-    }
-
-    return nbsStepsWrite(&self->nimbleClient.client.outSteps, self->nimbleClient.client.outSteps.expectedWriteId, buf,
-                         octetCount);
-}
-
-static void joinGameState(NimbleEngineClient* self)
-{
-    self->phase = NimbleEngineClientPhaseInGame;
-    // TransmuteVm authoritativeVm, TransmuteVm predictVm, RectifySetup setup, TransmuteState state, StepId stepId)
-    RectifySetup rectifySetup;
-    rectifySetup.allocator = self->nimbleClient.settings.memory;
-    rectifySetup.maxStepOctetSizeForSingleParticipant = self->maxStepOctetSizeForSingleParticipant;
-    rectifySetup.maxPlayerCount = self->maximumParticipantCount;
-    rectifySetup.log = self->log;
-
-    const NimbleClientGameState* joinedGameState = &self->nimbleClient.client.joinedGameState;
-    TransmuteState joinedTransmuteState = {joinedGameState->gameState, joinedGameState->gameStateOctetCount};
-    CLOG_C_DEBUG(&self->log, "Joined game state. octetCount: %zu step %04X", joinedGameState->gameStateOctetCount,
-                 joinedGameState->stepId);
-
-    rectifyInit(&self->rectify, self->authoritative, self->predicted, rectifySetup, joinedTransmuteState,
-                joinedGameState->stepId);
-}
-
-
-static void tickInGame(NimbleEngineClient* self)
-{
-    uint8_t inputBuf[512];
-    StepId authoritativeTickId;
-
-    if (self->nimbleClient.client.authoritativeStepsFromServer.stepsCount == 0) {
-        rectifyUpdate(&self->rectify);
-        return;
-    }
-
-    int octetCount = nimbleClientReadStep(&self->nimbleClient.client, inputBuf, 512, &authoritativeTickId);
-    if (octetCount < 0) {
-        CLOG_C_ERROR(&self->log, " could not read");
-    }
-
-    int errorCode = rectifyAddAuthoritativeStepRaw(&self->rectify, inputBuf, octetCount, authoritativeTickId);
-    if (errorCode < 0) {
-        CLOG_C_ERROR(&self->log, "could not go on, can not add authoritative steps")
-    }
-    rectifyUpdate(&self->rectify);
-}
-
-void nimbleEngineClientUpdate(NimbleEngineClient* self)
-{
-    size_t targetFps;
-
-    nimbleClientRealizeUpdate(&self->nimbleClient, monotonicTimeMsNow(), &targetFps);
-
-    switch (self->phase) {
-        case NimbleEngineClientPhaseWaitingForInitialGameState:
-            switch (self->nimbleClient.state) {
-                case NimbleClientRealizeStateInGame:
-                    joinGameState(self);
-                case NimbleClientRealizeStateInit:
-                    break;
-                case NimbleClientRealizeStateReInit:
-                    break;
-                case NimbleClientRealizeStateCleared:
-                    break;
-            }
-            break;
-        case NimbleEngineClientPhaseInGame:
-            tickInGame(self);
-            break;
-    }
-}
 
 static NlPlayerInput gamepadToPlayerInput(const SrGamepad* pad)
 {
@@ -300,6 +117,7 @@ typedef struct NlCombinedRender {
     NlFrontend frontend;
 
     // Set before every render
+    NlRenderStats renderStats;
     const NlGame* authoritative;
     const NlGame* predicted;
 } NlCombinedRender;
@@ -331,11 +149,8 @@ static void renderCallback(void* _self, SrWindow* window)
     NlCombinedRender* combinedRender = (NlCombinedRender*) _self;
 
     if (combinedRender->authoritative != 0 && combinedRender->predicted != 0) {
-        NlRenderStats renderStats;
-        renderStats.predictedTickId = 0;
-        renderStats.authoritativeStepsInBuffer = 0;
         nlRenderUpdate(&combinedRender->inGame, combinedRender->authoritative, combinedRender->predicted, 0, 0,
-                       renderStats);
+                       combinedRender->renderStats);
     }
 
     nlFrontendRenderUpdate(&combinedRender->frontendRender, &combinedRender->frontend);
@@ -484,7 +299,7 @@ int main(int argc, char* argv[])
     nlSimulationVmInit(&app.authoritative, authoritativeLog);
 
     Clog predictedLog;
-    predictedLog.constantPrefix = "NimbleBallAuth";
+    predictedLog.constantPrefix = "NimbleBallPredicted";
     predictedLog.config = &g_clog;
     nlSimulationVmInit(&app.predicted, predictedLog);
 
@@ -564,19 +379,38 @@ int main(int argc, char* argv[])
             break;
         }
 
+        NlRenderStats renderStats;
         if (app.nimbleEngineClient.phase == NimbleEngineClientPhaseInGame) {
-            TransmuteState authoritativeState = transmuteVmGetState(
-                &app.nimbleEngineClient.rectify.authoritative.transmuteVm);
-            CLOG_ASSERT(authoritativeState.octetSize == sizeof(NlGame), "internal error, wrong auth state size");
-            TransmuteState predictedState = transmuteVmGetState(&app.nimbleEngineClient.rectify.predicted.transmuteVm);
-            CLOG_ASSERT(predictedState.octetSize == sizeof(NlGame), "internal error, wrong state size");
+            NimbleGameState authoritativeState;
+            NimbleGameState predictedState;
 
-            combinedRender.authoritative = (const NlGame*) authoritativeState.state;
-            combinedRender.predicted = (const NlGame*) authoritativeState.state;
+            nimbleEngineClientGetGameStates(&app.nimbleEngineClient, &authoritativeState, &predictedState);
+
+            renderStats.authoritativeTickId = authoritativeState.tickId;
+            renderStats.predictedTickId = predictedState.tickId;
+
+            combinedRender.authoritative = (const NlGame*) authoritativeState.state.state;
+            combinedRender.predicted = (const NlGame*) predictedState.state.state;
+
+            CLOG_ASSERT(authoritativeState.state.octetSize == sizeof(NlGame), "internal error, wrong auth state size");
+            CLOG_ASSERT(predictedState.state.octetSize == sizeof(NlGame), "internal error, wrong state size");
+
+            NimbleEngineClientStats stats;
+            nimbleEngineClientGetStats(&app.nimbleEngineClient, &stats);
+
+            renderStats.authoritativeStepsInBuffer = stats.authoritativeBufferDeltaStat;
+
         } else {
             combinedRender.authoritative = 0;
             combinedRender.predicted = 0;
+
+            renderStats.predictedTickId = 0;
+            renderStats.authoritativeTickId = 0;
+            renderStats.authoritativeStepsInBuffer = 0;
         }
+
+        combinedRender.renderStats = renderStats;
+
         srWindowRender(&app.window, 0x115511, &combinedRender, renderCallback);
     }
 
