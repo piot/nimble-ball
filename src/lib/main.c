@@ -241,7 +241,7 @@ static void startJoining(NlApp* app, NlFrontend* frontend, ImprintAllocator* all
     nimbleBallClientLog.config = &g_clog;
     nimbleBallClientLog.constantPrefix = "NimbleBallClient";
 
-    hazyDatagramTransportInOutInit(&app->hazyClientTransport, app->transportForClient, hazyConfigRecommended(), nimbleBallClientLog);
+    hazyDatagramTransportInOutInit(&app->hazyClientTransport, app->transportForClient, allocator, allocatorWithFree, hazyConfigRecommended(), nimbleBallClientLog);
 
     CLOG_DEBUG("client datagram transport is set")
 
@@ -278,7 +278,7 @@ static void serverConsumeAllDatagrams(DatagramTransportInOutUdpServer* udpServer
     uint8_t datagram[1200];
     UdpTransportOut responseTransport;
 
-    for (size_t i=0; i<20; ++i) {
+    for (size_t i=0; i<32; ++i) {
         int octetCountReceived = datagramTransportInOutUdpServerReceive(udpServerWrapper, &connectionId, datagram, 1200,
                                                                         &responseTransport);
         if (octetCountReceived == 0) {
