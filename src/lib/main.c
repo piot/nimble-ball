@@ -104,7 +104,8 @@ static NlPlayerInput gamepadToPlayerInput(const SrGamepad* pad)
     NlPlayerInput playerInput;
     playerInput.input.inGameInput.horizontalAxis = pad->horizontalAxis;
     playerInput.input.inGameInput.verticalAxis = pad->verticalAxis;
-    playerInput.input.inGameInput.buttons = pad->a ? 0x01 : 0x00;
+    uint8_t  mask = pad->a ? 0x01 : 0x00 | pad->b ? 0x02 : 0x00;
+    playerInput.input.inGameInput.buttons = mask;
     playerInput.inputType = NlPlayerInputTypeInGame;
     return playerInput;
 }
