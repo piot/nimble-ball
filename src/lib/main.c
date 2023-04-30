@@ -5,17 +5,15 @@
 #include "frontend.h"
 #include "frontend_render.h"
 #include "nimble-engine-client/client.h"
-#include "nimble-steps-serialize/out_serialize.h"
-#include "rectify/rectify.h"
 #include <clog/console.h>
 #include <imprint/default_setup.h>
 #include <nimble-ball-presentation/render.h>
 #include <nimble-ball-simulation/nimble_ball_simulation_vm.h>
-#include <nimble-client/network_realizer.h>
 #include <nimble-server/server.h>
 #include <sdl-render/gamepad.h>
 #include <udp-client/udp_client.h>
 #include <udp-server/udp_server.h>
+#include <hazy/transport.h>
 
 clog_config g_clog;
 
@@ -142,6 +140,7 @@ typedef struct NlApp {
     NlSimulationVm authoritative;
     NlSimulationVm predicted;
     SrWindow window;
+    HazyDatagramTransportInOut hazyClientTransport;
 } NlApp;
 
 static void renderCallback(void* _self, SrWindow* window)
@@ -238,12 +237,18 @@ static void startJoining(NlApp* app, NlFrontend* frontend, ImprintAllocator* all
 
     udpTransportInit(&app->transportForClient, app, clientSideSend, clientSideReceive);
 
+    Clog nimbleBallClientLog;
+    nimbleBallClientLog.config = &g_clog;
+    nimbleBallClientLog.constantPrefix = "NimbleBallClient";
+
+    hazyDatagramTransportInOutInit(&app->hazyClientTransport, app->transportForClient, hazyConfigRecommended(), nimbleBallClientLog);
+
     CLOG_DEBUG("client datagram transport is set")
 
     NimbleEngineClientSetup setup;
     setup.memory = allocator;
     setup.blobMemory = allocatorWithFree;
-    setup.transport = app->transportForClient;
+    setup.transport = app->hazyClientTransport.transport;
 
     setup.authoritative = app->authoritative.transmuteVm;
     setup.predicted = app->predicted.transmuteVm;
@@ -273,10 +278,11 @@ int main(int argc, char* argv[])
     (void) argv;
 
     g_clog.log = clog_console;
+    g_clog.level = CLOG_TYPE_DEBUG;
     CLOG_VERBOSE("Nimble Ball start!")
 
     ImprintDefaultSetup imprintDefaultSetup;
-    imprintDefaultSetupInit(&imprintDefaultSetup, 1 * 1024 * 1024);
+    imprintDefaultSetupInit(&imprintDefaultSetup, 2 * 1024 * 1024);
 
     NlCombinedRender combinedRender;
     nlFrontendInit(&combinedRender.frontend);
@@ -330,6 +336,7 @@ int main(int argc, char* argv[])
                 break;
 
             case NlAppPhaseNetwork: {
+                hazyDatagramTransportInOutUpdate(&app.hazyClientTransport);
                 nimbleEngineClientUpdate(&app.nimbleEngineClient);
                 if (app.nimbleEngineClient.phase == NimbleEngineClientPhaseInGame &&
                     nimbleEngineClientMustAddPredictedInput(&app.nimbleEngineClient)) {
