@@ -272,6 +272,27 @@ static void startJoining(NlApp* app, NlFrontend* frontend, ImprintAllocator* all
     CLOG_DEBUG("nimble client is trying to join / rejoin server")
 }
 
+static void serverConsumeAllDatagrams(DatagramTransportInOutUdpServer* udpServerWrapper, NbdServer* nimbleServer)
+{
+    int connectionId;
+    uint8_t datagram[1200];
+    UdpTransportOut responseTransport;
+
+    for (size_t i=0; i<20; ++i) {
+        int octetCountReceived = datagramTransportInOutUdpServerReceive(udpServerWrapper, &connectionId, datagram, 1200,
+                                                                        &responseTransport);
+        if (octetCountReceived == 0) {
+            return;
+        }
+        NbdResponse response;
+        response.transportOut = &responseTransport;
+        int errorCode = nbdServerFeed(nimbleServer, connectionId, datagram, octetCountReceived, &response);
+        if (errorCode < 0) {
+            CLOG_ERROR("can not feed server")
+        }
+    }
+}
+
 int main(int argc, char* argv[])
 {
     (void) argc;
@@ -309,11 +330,22 @@ int main(int argc, char* argv[])
     predictedLog.config = &g_clog;
     nlSimulationVmInit(&app.predicted, predictedLog);
 
+    bool menuPressedLast = false;
     while (1) {
         int wantsToQuit = srGamepadPoll(gamepads, 2);
         if (wantsToQuit) {
             break;
         }
+        if (!menuPressedLast && gamepads[0].menu) {
+            if (combinedRender.inGame.mode == NlRenderModeAuthoritative) {
+                CLOG_NOTICE("TOGGLE: PREDICTED!")
+                combinedRender.inGame.mode = NlRenderModePredicted;
+            } else {
+                CLOG_NOTICE("TOGGLE: AUTHORITATIVE!")
+                combinedRender.inGame.mode = NlRenderModeAuthoritative;
+            }
+        }
+        menuPressedLast = gamepads[0].menu;
 
         nlFrontendHandleInput(&combinedRender.frontend, &gamepads[0]);
         switch (app.phase) {
@@ -358,21 +390,7 @@ int main(int argc, char* argv[])
                 }
 
                 if (app.isHosting) {
-                    int connectionId;
-                    uint8_t datagram[1200];
-                    UdpTransportOut responseTransport;
-
-                    int octetCountReceived = datagramTransportInOutUdpServerReceive(
-                        &app.udpServerWrapper, &connectionId, datagram, 1200, &responseTransport);
-                    if (octetCountReceived > 0) {
-                        NbdResponse response;
-                        response.transportOut = &responseTransport;
-                        int errorCode = nbdServerFeed(&app.nimbleServer, connectionId, datagram, octetCountReceived,
-                                                      &response);
-                        if (errorCode < 0) {
-                            CLOG_ERROR("can not feed server")
-                        }
-                    }
+                    serverConsumeAllDatagrams(&app.udpServerWrapper, &app.nimbleServer);
 
                     if (nbdServerMustProvideGameState(&app.nimbleServer)) {
                         StepId outStepId;
@@ -406,7 +424,6 @@ int main(int argc, char* argv[])
             nimbleEngineClientGetStats(&app.nimbleEngineClient, &stats);
 
             renderStats.authoritativeStepsInBuffer = stats.authoritativeBufferDeltaStat;
-
         } else {
             combinedRender.authoritative = 0;
             combinedRender.predicted = 0;
