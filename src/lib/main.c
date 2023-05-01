@@ -8,6 +8,7 @@
 #include <clog/console.h>
 #include <imprint/default_setup.h>
 #include <nimble-ball-presentation/render.h>
+#include <nimble-ball-presentation/audio.h>
 #include <nimble-ball-simulation/nimble_ball_simulation_vm.h>
 #include <nimble-server/server.h>
 #include <sdl-render/gamepad.h>
@@ -141,6 +142,8 @@ typedef struct NlApp {
     NlSimulationVm authoritative;
     NlSimulationVm predicted;
     SrWindow window;
+    SrAudio mixer;
+    NlAudio audio;
     HazyDatagramTransportInOut hazyClientTransport;
 } NlApp;
 
@@ -300,11 +303,11 @@ int main(int argc, char* argv[])
     (void) argv;
 
     g_clog.log = clog_console;
-    g_clog.level = CLOG_TYPE_DEBUG;
+    g_clog.level = CLOG_TYPE_VERBOSE;
     CLOG_VERBOSE("Nimble Ball start!")
 
     ImprintDefaultSetup imprintDefaultSetup;
-    imprintDefaultSetupInit(&imprintDefaultSetup, 2 * 1024 * 1024);
+    imprintDefaultSetupInit(&imprintDefaultSetup, 3 * 1024 * 1024);
 
     NlCombinedRender combinedRender;
     nlFrontendInit(&combinedRender.frontend);
@@ -316,6 +319,11 @@ int main(int argc, char* argv[])
     NlApp app;
 
     srWindowInit(&app.window, 640, 360, "nimble ball");
+
+    srAudioInit(&app.mixer);
+
+    nlAudioInit(&app.audio, &app.mixer);
+
     nlRenderInit(&combinedRender.inGame, app.window.renderer);
     nlFrontendRenderInit(&combinedRender.frontendRender, &app.window, combinedRender.inGame.font);
 
@@ -406,7 +414,7 @@ int main(int argc, char* argv[])
         }
 
         NlRenderStats renderStats;
-        if (app.nimbleEngineClient.phase == NimbleEngineClientPhaseInGame) {
+        if (app.phase == NlAppPhaseNetwork && app.nimbleEngineClient.phase == NimbleEngineClientPhaseInGame) {
             NimbleGameState authoritativeState;
             NimbleGameState predictedState;
 
@@ -437,7 +445,14 @@ int main(int argc, char* argv[])
         combinedRender.renderStats = renderStats;
 
         srWindowRender(&app.window, 0x115511, &combinedRender, renderCallback);
+        if (combinedRender.authoritative != 0 && combinedRender.predicted != 0) {
+            nlAudioUpdate(&app.audio, combinedRender.authoritative, combinedRender.predicted, 0, 0);
+        }
     }
 
+
     nlRenderClose(&combinedRender.inGame);
+
+    srAudioClose(&app.mixer);
+    srWindowClose(&app.window);
 }
