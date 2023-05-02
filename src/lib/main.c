@@ -6,15 +6,15 @@
 #include "frontend_render.h"
 #include "nimble-engine-client/client.h"
 #include <clog/console.h>
+#include <hazy/transport.h>
 #include <imprint/default_setup.h>
-#include <nimble-ball-presentation/render.h>
 #include <nimble-ball-presentation/audio.h>
+#include <nimble-ball-presentation/render.h>
 #include <nimble-ball-simulation/nimble_ball_simulation_vm.h>
 #include <nimble-server/server.h>
 #include <sdl-render/gamepad.h>
 #include <udp-client/udp_client.h>
 #include <udp-server/udp_server.h>
-#include <hazy/transport.h>
 
 clog_config g_clog;
 
@@ -101,13 +101,12 @@ octetCount)
 }
 */
 
-
 static NlPlayerInput gamepadToPlayerInput(const SrGamepad* pad)
 {
     NlPlayerInput playerInput;
     playerInput.input.inGameInput.horizontalAxis = pad->horizontalAxis;
     playerInput.input.inGameInput.verticalAxis = pad->verticalAxis;
-    uint8_t  mask = pad->a ? 0x01 : 0x00 | pad->b ? 0x02 : 0x00;
+    uint8_t mask = pad->a ? 0x01 : 0x00 | pad->b ? 0x02 : 0x00;
     playerInput.input.inGameInput.buttons = mask;
     playerInput.inputType = NlPlayerInputTypeInGame;
     return playerInput;
@@ -194,7 +193,7 @@ static void startHosting(NlApp* app, NlFrontend* frontend, ImprintAllocator* all
     serverLog.constantPrefix = "NbdServer";
 
     NbdServerSetup serverSetup;
-    serverSetup.maxSingleParticipantStepOctetCount =  maxSingleParticipantStepOctetCount;
+    serverSetup.maxSingleParticipantStepOctetCount = maxSingleParticipantStepOctetCount;
     serverSetup.maxParticipantCount = maxParticipantCount;
     serverSetup.maxConnectionCount = maxConnectionCount;
     serverSetup.maxParticipantCountForEachConnection = 2;
@@ -214,7 +213,9 @@ static void startHosting(NlApp* app, NlFrontend* frontend, ImprintAllocator* all
     // We just add a completely empty game. But it could be setup
     // with specific rules or game mode or similar
     // Since the whole game is blittable structs with no pointers, we can just cast it to an (uint8_t*)
-    nbdServerReInitWithGame(&app->nimbleServer, (const uint8_t*) &initialServerState, sizeof(initialServerState));
+    StepId stepId = 0xcafe;
+    nbdServerReInitWithGame(&app->nimbleServer, (const uint8_t*) &initialServerState, sizeof(initialServerState),
+                            stepId);
 
     CLOG_INFO("nimble server has initial game state. octet count: %zu", app->nimbleServer.game.latestState.octetCount)
     app->isHosting = true;
@@ -231,6 +232,10 @@ static int clientSideReceive(void* _self, uint8_t* data, size_t size)
     NlApp* app = _self;
     return udpClientReceive(&app->udpClient, data, size);
 }
+
+const int maxLocalPlayerCount = 2;
+const int useLocalPlayerCount = 1;
+
 
 static void startJoining(NlApp* app, NlFrontend* frontend, ImprintAllocator* allocator,
                          ImprintAllocatorWithFree* allocatorWithFree)
@@ -251,10 +256,10 @@ static void startJoining(NlApp* app, NlFrontend* frontend, ImprintAllocator* all
     nimbleBallClientLog.config = &g_clog;
     nimbleBallClientLog.constantPrefix = "NimbleBallClient";
 
-    hazyDatagramTransportInOutInit(&app->hazyClientTransport, app->transportForClient, allocator, allocatorWithFree, hazyConfigRecommended(), nimbleBallClientLog);
+    hazyDatagramTransportInOutInit(&app->hazyClientTransport, app->transportForClient, allocator, allocatorWithFree,
+                                   hazyConfigRecommended(), nimbleBallClientLog);
 
     CLOG_DEBUG("client datagram transport is set")
-
 
     NimbleSerializeVersion clientReportTransmuteVmVersion = {
         app->authoritative.transmuteVm.version.major,
@@ -283,9 +288,11 @@ static void startJoining(NlApp* app, NlFrontend* frontend, ImprintAllocator* all
 
     CLOG_DEBUG("nimble client is setup with transport")
 
+
     NimbleEngineClientGameJoinOptions joinOptions;
-    joinOptions.playerCount = 1;
-    joinOptions.players[0].localIndex = 32;
+    joinOptions.playerCount = useLocalPlayerCount;
+    joinOptions.players[0].localIndex = 99;
+    joinOptions.players[1].localIndex = 42;
     nimbleEngineClientRequestJoin(&app->nimbleEngineClient, joinOptions);
 
     CLOG_DEBUG("nimble client is trying to join / rejoin server")
@@ -297,7 +304,7 @@ static void serverConsumeAllDatagrams(DatagramTransportInOutUdpServer* udpServer
     uint8_t datagram[1200];
     UdpTransportOut responseTransport;
 
-    for (size_t i=0; i<32; ++i) {
+    for (size_t i = 0; i < 32; ++i) {
         bool didConnectNow = false;
         int octetCountReceived = datagramTransportInOutUdpServerReceive(udpServerWrapper, &connectionId, datagram, 1200,
                                                                         &didConnectNow, &responseTransport);
@@ -335,6 +342,7 @@ int main(int argc, char* argv[])
     SrGamepad gamepads[2];
 
     srGamepadInit(&gamepads[0]);
+    srGamepadInit(&gamepads[1]);
 
     NlApp app;
 
@@ -362,8 +370,9 @@ int main(int argc, char* argv[])
     nlSimulationVmInit(&app.predicted, predictedLog);
 
     bool menuPressedLast = false;
+
     while (1) {
-        int wantsToQuit = srGamepadPoll(gamepads, 2);
+        int wantsToQuit = srGamepadPoll(gamepads, maxLocalPlayerCount);
         if (wantsToQuit) {
             break;
         }
@@ -402,21 +411,31 @@ int main(int argc, char* argv[])
             case NlAppPhaseNetwork: {
                 hazyDatagramTransportInOutUpdate(&app.hazyClientTransport);
                 nimbleEngineClientUpdate(&app.nimbleEngineClient);
-                if (app.nimbleEngineClient.phase == NimbleEngineClientPhaseSynced && app.nimbleEngineClient.nimbleClient.client.localParticipantCount > 0 &&
+                if (app.nimbleEngineClient.phase == NimbleEngineClientPhaseSynced &&
+                    app.nimbleEngineClient.nimbleClient.client.localParticipantCount > 0 &&
                     nimbleEngineClientMustAddPredictedInput(&app.nimbleEngineClient)) {
-                    NlPlayerInput input = gamepadToPlayerInput(&gamepads[0]);
+                    NlPlayerInput inputs[2];
+                    inputs[0] = gamepadToPlayerInput(&gamepads[0]);
+                    inputs[1] = gamepadToPlayerInput(&gamepads[1]);
 
-                    uint8_t participantId = app.nimbleEngineClient.nimbleClient.client.localParticipantLookup[0]
-                                                .participantId;
+                    uint8_t participantId[2];
 
-                    TransmuteParticipantInput firstParticipant;
-                    firstParticipant.input = &input;
-                    firstParticipant.octetSize = sizeof(input);
-                    firstParticipant.participantId = participantId;
+                    participantId[0] = app.nimbleEngineClient.nimbleClient.client.localParticipantLookup[0]
+                                           .participantId;
+                    TransmuteParticipantInput participantInputs[2];
+                    participantInputs[0].input = &inputs[0];
+                    participantInputs[0].octetSize = sizeof(inputs[0]);
+                    participantInputs[0].participantId = participantId[0];
+
+                    participantId[1] = app.nimbleEngineClient.nimbleClient.client.localParticipantLookup[1]
+                                           .participantId;
+                    participantInputs[1].input = &inputs[1];
+                    participantInputs[1].octetSize = sizeof(inputs[1]);
+                    participantInputs[1].participantId = participantId[1];
 
                     TransmuteInput transmuteInput;
-                    transmuteInput.participantInputs = &firstParticipant;
-                    transmuteInput.participantCount = 1;
+                    transmuteInput.participantInputs = participantInputs;
+                    transmuteInput.participantCount = useLocalPlayerCount;
 
                     nimbleEngineClientAddPredictedInput(&app.nimbleEngineClient, &transmuteInput);
                 }
@@ -426,9 +445,11 @@ int main(int argc, char* argv[])
 
                     if (nbdServerMustProvideGameState(&app.nimbleServer)) {
                         StepId outStepId;
-                        TransmuteState authoritativeState = assentGetState(&app.nimbleEngineClient.rectify.authoritative, &outStepId);
+                        TransmuteState authoritativeState = assentGetState(
+                            &app.nimbleEngineClient.rectify.authoritative, &outStepId);
                         CLOG_ASSERT(authoritativeState.octetSize == sizeof(NlGame), "illegal authoritative state");
-                        nbdServerSetGameState(&app.nimbleServer, authoritativeState.state, authoritativeState.octetSize, outStepId);
+                        nbdServerSetGameState(&app.nimbleServer, authoritativeState.state, authoritativeState.octetSize,
+                                              outStepId);
                     }
                 }
             }
@@ -475,7 +496,6 @@ int main(int argc, char* argv[])
             nlAudioUpdate(&app.audio, combinedRender.authoritative, combinedRender.predicted, 0, 0);
         }
     }
-
 
     nlRenderClose(&combinedRender.inGame);
 
