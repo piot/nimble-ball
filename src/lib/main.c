@@ -33,7 +33,7 @@ typedef struct DatagramTransportInOutUdpServer {
 
 void datagramTransportInOutUdpServerInit(DatagramTransportInOutUdpServer* self, UdpServerSocket* udpServer);
 int datagramTransportInOutUdpServerReceive(DatagramTransportInOutUdpServer* self, int* connection, uint8_t* buf,
-                                           size_t maxDatagramSize, UdpTransportOut* response);
+                                           size_t maxDatagramSize, bool* wasConnected, UdpTransportOut* response);
 
 void datagramTransportInOutUdpServerInit(DatagramTransportInOutUdpServer* self, UdpServerSocket* udpServer)
 {
@@ -52,7 +52,7 @@ static int wrappedSend(void* _self, const uint8_t* data, size_t size)
 }
 
 int datagramTransportInOutUdpServerReceive(DatagramTransportInOutUdpServer* self, int* connection, uint8_t* buf,
-                                           size_t maxDatagramSize, UdpTransportOut* response)
+                                           size_t maxDatagramSize, bool* wasConnected, UdpTransportOut* response)
 {
     struct sockaddr_in receivedFromAddr;
     int octetsReceived = udpServerReceive(self->udpServer, buf, &maxDatagramSize, &receivedFromAddr);
@@ -70,6 +70,7 @@ int datagramTransportInOutUdpServerReceive(DatagramTransportInOutUdpServer* self
             *connection = i;
             response->self = &self->connections[i];
             response->send = wrappedSend;
+            *wasConnected = false;
             return octetsReceived;
         }
     }
@@ -80,6 +81,7 @@ int datagramTransportInOutUdpServerReceive(DatagramTransportInOutUdpServer* self
             response->self = &self->connections[i];
             response->send = wrappedSend;
             self->connections[i].addr = receivedFromAddr;
+            *wasConnected = true;
             CLOG_DEBUG("Received from new udp address. Assigned to connectionId: %d", i)
             return octetsReceived;
         }
@@ -142,6 +144,7 @@ typedef struct NlApp {
     NlSimulationVm authoritative;
     NlSimulationVm predicted;
     SrWindow window;
+    StatsIntPerSecond renderFps;
     SrAudio mixer;
     NlAudio audio;
     HazyDatagramTransportInOut hazyClientTransport;
@@ -233,6 +236,9 @@ static void startJoining(NlApp* app, NlFrontend* frontend, ImprintAllocator* all
                          ImprintAllocatorWithFree* allocatorWithFree)
 {
     CLOG_DEBUG("start joining")
+    app->phase = NlAppPhaseNetwork;
+    frontend->phase = NlFrontendPhaseJoining;
+
     int errorCode = udpClientInit(&app->udpClient, "127.0.0.1", gameUdpPort);
     if (errorCode < 0) {
         CLOG_ERROR("could not start udp client")
@@ -249,6 +255,13 @@ static void startJoining(NlApp* app, NlFrontend* frontend, ImprintAllocator* all
 
     CLOG_DEBUG("client datagram transport is set")
 
+
+    NimbleSerializeVersion clientReportTransmuteVmVersion = {
+        app->authoritative.transmuteVm.version.major,
+        app->authoritative.transmuteVm.version.minor,
+        app->authoritative.transmuteVm.version.patch,
+    };
+
     NimbleEngineClientSetup setup;
     setup.memory = allocator;
     setup.blobMemory = allocatorWithFree;
@@ -257,7 +270,9 @@ static void startJoining(NlApp* app, NlFrontend* frontend, ImprintAllocator* all
     setup.authoritative = app->authoritative.transmuteVm;
     setup.predicted = app->predicted.transmuteVm;
     setup.maximumSingleParticipantStepOctetCount = sizeof(NlPlayerInput);
-    setup.maximumParticipantCount = 8; // TODO: the participant count should come from the server
+    setup.maximumParticipantCount = 8;
+    setup.applicationVersion = clientReportTransmuteVmVersion;
+    setup.maxTicksFromAuthoritative = 18;
 
     Clog nimbleEngineClientLog;
     nimbleEngineClientLog.config = &g_clog;
@@ -283,10 +298,15 @@ static void serverConsumeAllDatagrams(DatagramTransportInOutUdpServer* udpServer
     UdpTransportOut responseTransport;
 
     for (size_t i=0; i<32; ++i) {
+        bool didConnectNow = false;
         int octetCountReceived = datagramTransportInOutUdpServerReceive(udpServerWrapper, &connectionId, datagram, 1200,
-                                                                        &responseTransport);
+                                                                        &didConnectNow, &responseTransport);
+
         if (octetCountReceived == 0) {
             return;
+        }
+        if (didConnectNow) {
+            nbdServerConnectionConnected(nimbleServer, connectionId);
         }
         NbdResponse response;
         response.transportOut = &responseTransport;
@@ -303,11 +323,11 @@ int main(int argc, char* argv[])
     (void) argv;
 
     g_clog.log = clog_console;
-    g_clog.level = CLOG_TYPE_VERBOSE;
+    g_clog.level = CLOG_TYPE_DEBUG;
     CLOG_VERBOSE("Nimble Ball start!")
 
     ImprintDefaultSetup imprintDefaultSetup;
-    imprintDefaultSetupInit(&imprintDefaultSetup, 3 * 1024 * 1024);
+    imprintDefaultSetupInit(&imprintDefaultSetup, 5 * 1024 * 1024);
 
     NlCombinedRender combinedRender;
     nlFrontendInit(&combinedRender.frontend);
@@ -317,6 +337,8 @@ int main(int argc, char* argv[])
     srGamepadInit(&gamepads[0]);
 
     NlApp app;
+
+    statsIntPerSecondInit(&app.renderFps, monotonicTimeMsNow(), 1000);
 
     srWindowInit(&app.window, 640, 360, "nimble ball");
 
@@ -333,11 +355,13 @@ int main(int argc, char* argv[])
     authoritativeLog.constantPrefix = "NimbleBallAuth";
     authoritativeLog.config = &g_clog;
     nlSimulationVmInit(&app.authoritative, authoritativeLog);
+    app.authoritative.veryEvilHackNotDeterministicPleaseRemoveMe = true; // TODO: REMOVE THIS
 
     Clog predictedLog;
     predictedLog.constantPrefix = "NimbleBallPredicted";
     predictedLog.config = &g_clog;
     nlSimulationVmInit(&app.predicted, predictedLog);
+    app.predicted.veryEvilHackNotDeterministicPleaseRemoveMe = false; // TODO: REMOVE THIS
 
     bool menuPressedLast = false;
     while (1) {
@@ -362,7 +386,8 @@ int main(int argc, char* argv[])
                 switch (combinedRender.frontend.mainMenuSelected) {
                     case NlFrontendMenuSelectJoin:
                         CLOG_DEBUG("Join a game")
-                        combinedRender.frontend.phase = NlFrontendPhaseJoining;
+                        startJoining(&app, &combinedRender.frontend, &imprintDefaultSetup.tagAllocator.info,
+                                     &imprintDefaultSetup.slabAllocator.info);
                         break;
                     case NlFrontendMenuSelectHost:
                         CLOG_DEBUG("Host a game")
@@ -379,7 +404,7 @@ int main(int argc, char* argv[])
             case NlAppPhaseNetwork: {
                 hazyDatagramTransportInOutUpdate(&app.hazyClientTransport);
                 nimbleEngineClientUpdate(&app.nimbleEngineClient);
-                if (app.nimbleEngineClient.phase == NimbleEngineClientPhaseInGame &&
+                if (app.nimbleEngineClient.phase == NimbleEngineClientPhaseSynced && app.nimbleEngineClient.nimbleClient.client.localParticipantCount > 0 &&
                     nimbleEngineClientMustAddPredictedInput(&app.nimbleEngineClient)) {
                     NlPlayerInput input = gamepadToPlayerInput(&gamepads[0]);
 
@@ -414,7 +439,7 @@ int main(int argc, char* argv[])
         }
 
         NlRenderStats renderStats;
-        if (app.phase == NlAppPhaseNetwork && app.nimbleEngineClient.phase == NimbleEngineClientPhaseInGame) {
+        if (app.phase == NlAppPhaseNetwork && app.nimbleEngineClient.phase == NimbleEngineClientPhaseSynced) {
             NimbleGameState authoritativeState;
             NimbleGameState predictedState;
 
@@ -442,9 +467,12 @@ int main(int argc, char* argv[])
             renderStats.authoritativeStepsInBuffer = 0;
         }
 
+        renderStats.renderFps = app.renderFps.avg;
         combinedRender.renderStats = renderStats;
 
         srWindowRender(&app.window, 0x115511, &combinedRender, renderCallback);
+        statsIntPerSecondAdd(&app.renderFps, 1);
+        statsIntPerSecondUpdate(&app.renderFps, monotonicTimeMsNow());
         if (combinedRender.authoritative != 0 && combinedRender.predicted != 0) {
             nlAudioUpdate(&app.audio, combinedRender.authoritative, combinedRender.predicted, 0, 0);
         }
