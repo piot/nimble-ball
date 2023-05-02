@@ -355,13 +355,11 @@ int main(int argc, char* argv[])
     authoritativeLog.constantPrefix = "NimbleBallAuth";
     authoritativeLog.config = &g_clog;
     nlSimulationVmInit(&app.authoritative, authoritativeLog);
-    app.authoritative.veryEvilHackNotDeterministicPleaseRemoveMe = true; // TODO: REMOVE THIS
 
     Clog predictedLog;
     predictedLog.constantPrefix = "NimbleBallPredicted";
     predictedLog.config = &g_clog;
     nlSimulationVmInit(&app.predicted, predictedLog);
-    app.predicted.veryEvilHackNotDeterministicPleaseRemoveMe = false; // TODO: REMOVE THIS
 
     bool menuPressedLast = false;
     while (1) {
