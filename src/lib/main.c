@@ -236,7 +236,6 @@ static int clientSideReceive(void* _self, uint8_t* data, size_t size)
 const int maxLocalPlayerCount = 2;
 const int useLocalPlayerCount = 1;
 
-
 static void startJoining(NlApp* app, NlFrontend* frontend, ImprintAllocator* allocator,
                          ImprintAllocatorWithFree* allocatorWithFree)
 {
@@ -287,7 +286,6 @@ static void startJoining(NlApp* app, NlFrontend* frontend, ImprintAllocator* all
     nimbleEngineClientInit(&app->nimbleEngineClient, setup);
 
     CLOG_DEBUG("nimble client is setup with transport")
-
 
     NimbleEngineClientGameJoinOptions joinOptions;
     joinOptions.playerCount = useLocalPlayerCount;
@@ -358,6 +356,7 @@ int main(int argc, char* argv[])
     nlFrontendRenderInit(&combinedRender.frontendRender, &app.window, combinedRender.inGame.font);
 
     app.phase = NlAppPhaseIdle;
+    app.isHosting = false;
 
     Clog authoritativeLog;
     authoritativeLog.constantPrefix = "NimbleBallAuth";
@@ -443,7 +442,8 @@ int main(int argc, char* argv[])
                 if (app.isHosting) {
                     serverConsumeAllDatagrams(&app.udpServerWrapper, &app.nimbleServer);
 
-                    if (nbdServerMustProvideGameState(&app.nimbleServer)) {
+                    if (app.nimbleEngineClient.phase == NimbleEngineClientPhaseSynced &&
+                        nbdServerMustProvideGameState(&app.nimbleServer)) {
                         StepId outStepId;
                         TransmuteState authoritativeState = assentGetState(
                             &app.nimbleEngineClient.rectify.authoritative, &outStepId);
