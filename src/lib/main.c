@@ -194,7 +194,7 @@ static void startJoining(NlApp* app, NlFrontend* frontend, ImprintAllocator* all
     setup.maximumSingleParticipantStepOctetCount = sizeof(NlPlayerInput);
     setup.maximumParticipantCount = 8;
     setup.applicationVersion = clientReportTransmuteVmVersion;
-    setup.maxTicksFromAuthoritative = 20U;
+    setup.maxTicksFromAuthoritative = 10U;
 
     Clog nimbleEngineClientLog;
     nimbleEngineClientLog.config = &g_clog;
@@ -421,7 +421,6 @@ int main(int argc, char* argv[])
     }
 
     nlRenderClose(&combinedRender.inGame);
-
     srAudioClose(&app.mixer);
     srWindowClose(&app.window);
 }
