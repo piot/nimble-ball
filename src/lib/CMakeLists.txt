@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.17)
 project(nimble_ball C)
 
+
+
 set(CMAKE_C_STANDARD 99)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -19,6 +21,8 @@ endif ()
 
 
 set(DEPS ../../deps/)
+
+add_subdirectory("${DEPS}piot/udp-server-connections/src/lib/" temp)
 
 
 file(GLOB_RECURSE deps_src FOLLOW_SYMLINKS
@@ -45,7 +49,7 @@ target_link_libraries(nimble_ball PUBLIC SDL2::SDL2 SDL2_image::SDL2_image SDL2_
 
 if (WIN32)
 else ()
-    target_link_libraries(nimble_ball PUBLIC m)
+    target_link_libraries(nimble_ball PUBLIC udp_server_connections m)
 endif (WIN32)
 
 target_compile_options(nimble_ball PRIVATE -Wall -Wextra -Wshadow -Wstrict-aliasing -ansi -pedantic -Wno-declaration-after-statement -Wno-extra-semi-stmt -Wno-undef -Wno-unused-variable -Wno-unused-parameter -Wno-padded -Werror=implicit-function-declaration -Werror=incompatible-pointer-types -Werror=missing-prototypes -Werror=int-conversion -Werror=return-type -Werror=incompatible-function-pointer-types) # -Werror=incompatible-pointer-types-discards-qualifiers
@@ -80,6 +84,7 @@ target_include_directories(nimble_ball PRIVATE ${DEPS}piot/stats-c/src/include)
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/bit-array/src/include)
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/nimble-server-lib/src/include)
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/nimble-client-c/src/include)
+
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/nimble-engine-client/src/include)
 
 target_include_directories(nimble_ball PRIVATE ../include)

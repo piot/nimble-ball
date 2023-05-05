@@ -14,92 +14,9 @@
 #include <nimble-server/server.h>
 #include <sdl-render/gamepad.h>
 #include <udp-client/udp_client.h>
-#include <udp-server/udp_server.h>
+#include <udp-server-connections/connections.h>
 
 clog_config g_clog;
-
-struct DatagramTransportInOutUdpServer;
-
-typedef struct DatagramTransportInOutUdpServerRemote {
-    struct sockaddr_in addr;
-    struct DatagramTransportInOutUdpServer* parent;
-} DatagramTransportInOutUdpServerRemote;
-
-typedef struct DatagramTransportInOutUdpServer {
-    UdpServerSocket* udpServer;
-    DatagramTransportInOutUdpServerRemote connections[16];
-    size_t connectionCapacity;
-} DatagramTransportInOutUdpServer;
-
-void datagramTransportInOutUdpServerInit(DatagramTransportInOutUdpServer* self, UdpServerSocket* udpServer);
-int datagramTransportInOutUdpServerReceive(DatagramTransportInOutUdpServer* self, int* connection, uint8_t* buf,
-                                           size_t maxDatagramSize, bool* wasConnected, UdpTransportOut* response);
-
-void datagramTransportInOutUdpServerInit(DatagramTransportInOutUdpServer* self, UdpServerSocket* udpServer)
-{
-    self->udpServer = udpServer;
-    self->connectionCapacity = 16;
-    for (size_t i = 0; i < self->connectionCapacity; ++i) {
-        self->connections[i].addr.sin_addr.s_addr = 0;
-        self->connections[i].parent = self;
-    }
-}
-
-static int wrappedSend(void* _self, const uint8_t* data, size_t size)
-{
-    DatagramTransportInOutUdpServerRemote* self = _self;
-    return udpServerSend(self->parent->udpServer, data, size, &self->addr);
-}
-
-int datagramTransportInOutUdpServerReceive(DatagramTransportInOutUdpServer* self, int* connection, uint8_t* buf,
-                                           size_t maxDatagramSize, bool* wasConnected, UdpTransportOut* response)
-{
-    struct sockaddr_in receivedFromAddr;
-    int octetsReceived = udpServerReceive(self->udpServer, buf, &maxDatagramSize, &receivedFromAddr);
-    if (octetsReceived == 0) {
-        return 0;
-    }
-
-    if (octetsReceived < 0) {
-        return octetsReceived;
-    }
-
-    for (size_t i = 0; i < self->connectionCapacity; ++i) {
-        if (receivedFromAddr.sin_addr.s_addr == self->connections[i].addr.sin_addr.s_addr &&
-            receivedFromAddr.sin_port == self->connections[i].addr.sin_port) {
-            *connection = i;
-            response->self = &self->connections[i];
-            response->send = wrappedSend;
-            *wasConnected = false;
-            return octetsReceived;
-        }
-    }
-
-    for (size_t i = 0; i < self->connectionCapacity; ++i) {
-        if (self->connections[i].addr.sin_addr.s_addr == 0) {
-            *connection = i;
-            response->self = &self->connections[i];
-            response->send = wrappedSend;
-            self->connections[i].addr = receivedFromAddr;
-            *wasConnected = true;
-            CLOG_DEBUG("Received from new udp address. Assigned to connectionId: %d", i)
-            return octetsReceived;
-        }
-    }
-
-    CLOG_SOFT_ERROR("could not receive from udp server")
-    return -94;
-}
-
-/*
-int datagramTransportUdpServerSend(DatagramTransportInOutUdpServer* self, int connectionId, uint8_t* buf, size_t
-octetCount)
-{
-    DatagramTransportInOutUdpServerRemote* connection = &self->connections[connectionId];
-
-    return udpServerSend(&self->udpServer, connection->addr, buf, octetCount);
-}
-*/
 
 static NlPlayerInput gamepadToPlayerInput(const SrGamepad* pad)
 {
@@ -131,7 +48,7 @@ typedef enum NlAppPhase {
 typedef struct NlApp {
     NlAppPhase phase;
     UdpServerSocket udpServer;
-    DatagramTransportInOutUdpServer udpServerWrapper;
+    UdpServerConnections udpServerWrapper;
     NbdServer nimbleServer;
     UdpTransportInOut transportForHost;
 
@@ -174,7 +91,7 @@ static void startHosting(NlApp* app, NlFrontend* frontend, ImprintAllocator* all
     }
     CLOG_INFO("listening on UDP port %d", gameUdpPort);
 
-    datagramTransportInOutUdpServerInit(&app->udpServerWrapper, &app->udpServer);
+    udpServerConnectionsInit(&app->udpServerWrapper, &app->udpServer);
 
     CLOG_INFO("wrapped udp server to handle connections")
 
@@ -184,8 +101,8 @@ static void startHosting(NlApp* app, NlFrontend* frontend, ImprintAllocator* all
         app->authoritative.transmuteVm.version.patch,
     };
 
-    const size_t maxConnectionCount = 4;
-    const size_t maxParticipantCount = maxConnectionCount * 2;
+    const size_t maxConnectionCount = 4U;
+    const size_t maxParticipantCount = maxConnectionCount * 2U;
     const size_t maxSingleParticipantStepOctetCount = sizeof(NlPlayerInput);
 
     Clog serverLog;
@@ -201,6 +118,7 @@ static void startHosting(NlApp* app, NlFrontend* frontend, ImprintAllocator* all
     serverSetup.memory = allocator;
     serverSetup.blobAllocator = allocatorWithFree;
     serverSetup.applicationVersion = serverReportTransmuteVmVersion;
+    serverSetup.now = monotonicTimeMsNow();
     serverSetup.log = serverLog;
     errorCode = nbdServerInit(&app->nimbleServer, serverSetup);
     if (errorCode < 0) {
@@ -213,9 +131,9 @@ static void startHosting(NlApp* app, NlFrontend* frontend, ImprintAllocator* all
     // We just add a completely empty game. But it could be setup
     // with specific rules or game mode or similar
     // Since the whole game is blittable structs with no pointers, we can just cast it to an (uint8_t*)
-    StepId stepId = 0xcafe;
+    StepId stepId = 0xcafeU;
     nbdServerReInitWithGame(&app->nimbleServer, (const uint8_t*) &initialServerState, sizeof(initialServerState),
-                            stepId);
+                            stepId, monotonicTimeMsNow());
 
     CLOG_INFO("nimble server has initial game state. octet count: %zu", app->nimbleServer.game.latestState.octetCount)
     app->isHosting = true;
@@ -276,7 +194,7 @@ static void startJoining(NlApp* app, NlFrontend* frontend, ImprintAllocator* all
     setup.maximumSingleParticipantStepOctetCount = sizeof(NlPlayerInput);
     setup.maximumParticipantCount = 8;
     setup.applicationVersion = clientReportTransmuteVmVersion;
-    setup.maxTicksFromAuthoritative = 18;
+    setup.maxTicksFromAuthoritative = 20U;
 
     Clog nimbleEngineClientLog;
     nimbleEngineClientLog.config = &g_clog;
@@ -293,10 +211,12 @@ static void startJoining(NlApp* app, NlFrontend* frontend, ImprintAllocator* all
     joinOptions.players[1].localIndex = 42;
     nimbleEngineClientRequestJoin(&app->nimbleEngineClient, joinOptions);
 
+    app->nimbleEngineClient.isHostingLocally = app->isHosting;
+
     CLOG_DEBUG("nimble client is trying to join / rejoin server")
 }
 
-static void serverConsumeAllDatagrams(DatagramTransportInOutUdpServer* udpServerWrapper, NbdServer* nimbleServer)
+static void serverConsumeAllDatagrams(UdpServerConnections* udpServerWrapper, NbdServer* nimbleServer)
 {
     int connectionId;
     uint8_t datagram[1200];
@@ -304,8 +224,8 @@ static void serverConsumeAllDatagrams(DatagramTransportInOutUdpServer* udpServer
 
     for (size_t i = 0; i < 32; ++i) {
         bool didConnectNow = false;
-        int octetCountReceived = datagramTransportInOutUdpServerReceive(udpServerWrapper, &connectionId, datagram, 1200,
-                                                                        &didConnectNow, &responseTransport);
+        int octetCountReceived = udpServerConnectionsReceive(udpServerWrapper, &connectionId, datagram, 1200,
+                                                             &didConnectNow, &responseTransport);
 
         if (octetCountReceived == 0) {
             return;
@@ -370,9 +290,9 @@ int main(int argc, char* argv[])
 
     bool menuPressedLast = false;
 
-    while (1) {
+    while (true) {
         int wantsToQuit = srGamepadPoll(gamepads, maxLocalPlayerCount);
-        if (wantsToQuit) {
+        if (wantsToQuit == 1) {
             break;
         }
         if (!menuPressedLast && gamepads[0].menu) {
@@ -403,6 +323,7 @@ int main(int argc, char* argv[])
                                      &imprintDefaultSetup.slabAllocator.info);
                         break;
                     case NlFrontendMenuSelectUnknown:
+                    default:
                         break;
                 }
                 break;
@@ -440,6 +361,7 @@ int main(int argc, char* argv[])
                 }
 
                 if (app.isHosting) {
+                    nbdServerUpdate(&app.nimbleServer, monotonicTimeMsNow());
                     serverConsumeAllDatagrams(&app.udpServerWrapper, &app.nimbleServer);
 
                     if (app.nimbleEngineClient.phase == NimbleEngineClientPhaseSynced &&
@@ -487,13 +409,14 @@ int main(int argc, char* argv[])
         }
 
         renderStats.renderFps = app.renderFps.avg;
+        renderStats.latencyMs = app.nimbleEngineClient.nimbleClient.client.latencyMsStat.avg;
         combinedRender.renderStats = renderStats;
 
         srWindowRender(&app.window, 0x115511, &combinedRender, renderCallback);
         statsIntPerSecondAdd(&app.renderFps, 1);
         statsIntPerSecondUpdate(&app.renderFps, monotonicTimeMsNow());
         if (combinedRender.authoritative != 0 && combinedRender.predicted != 0) {
-            nlAudioUpdate(&app.audio, combinedRender.authoritative, combinedRender.predicted, 0, 0);
+            nlAudioUpdate(&app.audio, combinedRender.authoritative, combinedRender.predicted, 0, 0U);
         }
     }
 
