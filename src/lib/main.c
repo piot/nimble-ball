@@ -174,7 +174,7 @@ static void startJoining(NlApp* app, NlFrontend* frontend, ImprintAllocator* all
     nimbleBallClientLog.constantPrefix = "NimbleBallClient";
 
     hazyDatagramTransportInOutInit(&app->hazyClientTransport, app->transportForClient, allocator, allocatorWithFree,
-                                   hazyConfigRecommended(), nimbleBallClientLog);
+                                   hazyConfigGoodCondition(), nimbleBallClientLog);
 
     CLOG_DEBUG("client datagram transport is set")
 
