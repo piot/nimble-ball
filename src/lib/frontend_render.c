@@ -28,10 +28,14 @@ static SDL_Color selectColor(NlFrontendRender* render, bool isSelected)
 
 static void renderMainMenu(NlFrontendRender* self, const NlFrontend* frontend)
 {
-    srFontRenderAndCopy(&self->font, "Join Game", 220, 230,
+    srFontRenderAndCopy(&self->font, "Join LAN", 220, 230,
                         selectColor(self, frontend->mainMenuSelect == NlFrontendMenuSelectJoin));
-    srFontRenderAndCopy(&self->font, "Host Game", 220, 190,
+    srFontRenderAndCopy(&self->font, "Host LAN", 220, 190,
                         selectColor(self, frontend->mainMenuSelect == NlFrontendMenuSelectHost));
+    srFontRenderAndCopy(&self->font, "Join Online", 220, 150,
+                        selectColor(self, frontend->mainMenuSelect == NlFrontendMenuSelectJoinOnline));
+    srFontRenderAndCopy(&self->font, "Host Online", 220, 110,
+                        selectColor(self, frontend->mainMenuSelect == NlFrontendMenuSelectHostOnline));
 }
 
 void nlFrontendRenderUpdate(NlFrontendRender* self, const NlFrontend* frontend)

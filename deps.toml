@@ -39,3 +39,11 @@ version = "*"
 [[dependencies]]
 name = "piot/nimble-engine-client"
 version = "*"
+
+[[dependencies]]
+name = "piot/conclave-client-c"
+version = "*"
+
+[[dependencies]]
+name = "piot/transport-stack"
+version = "*"

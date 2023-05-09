@@ -13,12 +13,15 @@ typedef enum NlFrontendMenuSelect {
     NlFrontendMenuSelectUnknown,
     NlFrontendMenuSelectHost,
     NlFrontendMenuSelectJoin,
+    NlFrontendMenuSelectHostOnline,
+    NlFrontendMenuSelectJoinOnline,
 } NlFrontendMenuSelect;
 
 typedef enum NlFrontendPhase {
     NlFrontendPhaseMainMenu,
     NlFrontendPhaseJoining,
     NlFrontendPhaseHosting,
+    NlFrontendPhaseHostingOnline,
     NlFrontendPhaseInGame,
 } NlFrontendPhase;
 

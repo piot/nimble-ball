@@ -4,17 +4,22 @@
  *--------------------------------------------------------------------------------------------*/
 #include "frontend.h"
 #include "frontend_render.h"
-#include "nimble-engine-client/client.h"
 #include <clog/console.h>
-#include <hazy/transport.h>
+#include <conclave-client/client.h>
+#include <conclave-client/network_realizer.h>
 #include <imprint/default_setup.h>
 #include <nimble-ball-presentation/audio.h>
 #include <nimble-ball-presentation/render.h>
 #include <nimble-ball-simulation/nimble_ball_simulation_vm.h>
+#include <nimble-engine-client/client.h>
+#include <nimble-server/participant_connection.h>
 #include <nimble-server/server.h>
 #include <sdl-render/gamepad.h>
-#include <udp-client/udp_client.h>
-#include <udp-server-connections/connections.h>
+#include <transport-stack/multi.h>
+#include <transport-stack/single.h>
+
+const size_t gameRelayPort = 27003U;
+const char* gameRelayHost = "127.0.0.1";
 
 clog_config g_clog;
 
@@ -29,69 +34,54 @@ static NlPlayerInput gamepadToPlayerInput(const SrGamepad* pad)
     return playerInput;
 }
 
-typedef struct NlCombinedRender {
-    NlFrontendRender frontendRender;
-    NlRender inGame;
-    NlFrontend frontend;
-
-    // Set before every render
-    NlRenderStats renderStats;
-    const NlGame* authoritative;
-    const NlGame* predicted;
-} NlCombinedRender;
-
 typedef enum NlAppPhase {
     NlAppPhaseIdle,
     NlAppPhaseNetwork,
 } NlAppPhase;
 
+/// Shared resources
 typedef struct NlApp {
     NlAppPhase phase;
-    UdpServerSocket udpServer;
-    UdpServerConnections udpServerWrapper;
-    NbdServer nimbleServer;
-    UdpTransportInOut transportForHost;
-
-    bool isHosting;
-    NimbleEngineClient nimbleEngineClient;
-    UdpClientSocket udpClient;
-    UdpTransportInOut transportForClient;
-
+    ImprintAllocator* allocator;
+    ImprintAllocatorWithFree* allocatorWithFree;
+    Clog log;
     NlSimulationVm authoritative;
     NlSimulationVm predicted;
+    NlFrontend frontend;
+    bool nbdServerIsStarted;
+} NlApp;
+
+/// Nimble server and transport stack
+typedef struct NlAppHost {
+    NbdServer nimbleServer;
+    TransportStackMulti multiTransport;
+    Clog log;
+} NlAppHost;
+
+/// Nimble client, transport stack and presentation
+typedef struct NlAppClient {
+    SrGamepad gamepads[2];
     SrWindow window;
+    NlRender inGame;
+    NlFrontendRender frontendRender;
     StatsIntPerSecond renderFps;
     SrAudio mixer;
     NlAudio audio;
-    HazyDatagramTransportInOut hazyClientTransport;
-} NlApp;
+    TransportStackSingle singleTransport;
+    ImprintAllocator* allocator;
+    ImprintAllocatorWithFree* allocatorWithFree;
+    NimbleEngineClient nimbleEngineClient;
+    Clog log;
+    bool menuPressedLast;
+} NlAppClient;
 
-static void renderCallback(void* _self, SrWindow* window)
-{
-    NlCombinedRender* combinedRender = (NlCombinedRender*) _self;
-
-    if (combinedRender->authoritative != 0 && combinedRender->predicted != 0) {
-        nlRenderUpdate(&combinedRender->inGame, combinedRender->authoritative, combinedRender->predicted, 0, 0,
-                       combinedRender->renderStats);
-    }
-
-    nlFrontendRenderUpdate(&combinedRender->frontendRender, &combinedRender->frontend);
-}
-
-const int gameUdpPort = 27001;
-
-static void startHosting(NlApp* app, NlFrontend* frontend, ImprintAllocator* allocator,
-                         ImprintAllocatorWithFree* allocatorWithFree)
+/// Initializes the nimble server on the previously setup multi transport
+/// @param self
+/// @param app
+static void startHostingOnMultiTransport(NlAppHost* self, NlApp* app)
 {
     app->phase = NlAppPhaseNetwork;
-    frontend->phase = NlFrontendPhaseHosting;
-    int errorCode = udpServerInit(&app->udpServer, gameUdpPort, false);
-    if (errorCode < 0) {
-        CLOG_ERROR("could not host on port %d", gameUdpPort)
-    }
-    CLOG_INFO("listening on UDP port %d", gameUdpPort);
-
-    udpServerConnectionsInit(&app->udpServerWrapper, &app->udpServer);
+    app->frontend.phase = NlFrontendPhaseHosting;
 
     CLOG_INFO("wrapped udp server to handle connections")
 
@@ -115,12 +105,13 @@ static void startHosting(NlApp* app, NlFrontend* frontend, ImprintAllocator* all
     serverSetup.maxConnectionCount = maxConnectionCount;
     serverSetup.maxParticipantCountForEachConnection = 2;
     serverSetup.maxGameStateOctetCount = sizeof(NlGame);
-    serverSetup.memory = allocator;
-    serverSetup.blobAllocator = allocatorWithFree;
+    serverSetup.memory = app->allocator;
+    serverSetup.blobAllocator = app->allocatorWithFree;
     serverSetup.applicationVersion = serverReportTransmuteVmVersion;
     serverSetup.now = monotonicTimeMsNow();
     serverSetup.log = serverLog;
-    errorCode = nbdServerInit(&app->nimbleServer, serverSetup);
+    serverSetup.multiTransport = self->multiTransport.multiTransport;
+    int errorCode = nbdServerInit(&self->nimbleServer, serverSetup);
     if (errorCode < 0) {
         CLOG_ERROR("could not initialize nimble server %d", errorCode)
     }
@@ -132,49 +123,24 @@ static void startHosting(NlApp* app, NlFrontend* frontend, ImprintAllocator* all
     // with specific rules or game mode or similar
     // Since the whole game is blittable structs with no pointers, we can just cast it to an (uint8_t*)
     StepId stepId = 0xcafeU;
-    nbdServerReInitWithGame(&app->nimbleServer, (const uint8_t*) &initialServerState, sizeof(initialServerState),
+    nbdServerReInitWithGame(&self->nimbleServer, (const uint8_t*) &initialServerState, sizeof(initialServerState),
                             stepId, monotonicTimeMsNow());
 
-    CLOG_INFO("nimble server has initial game state. octet count: %zu", app->nimbleServer.game.latestState.octetCount)
-    app->isHosting = true;
-}
-
-static int clientSideSend(void* _self, const uint8_t* data, size_t size)
-{
-    NlApp* app = _self;
-    return udpClientSend(&app->udpClient, data, size);
-}
-
-static int clientSideReceive(void* _self, uint8_t* data, size_t size)
-{
-    NlApp* app = _self;
-    return udpClientReceive(&app->udpClient, data, size);
+    CLOG_INFO("nimble server has initial game state. octet count: %zu", self->nimbleServer.game.latestState.octetCount)
+    app->nbdServerIsStarted = true;
 }
 
 const int maxLocalPlayerCount = 2;
 const int useLocalPlayerCount = 1;
 
-static void startJoining(NlApp* app, NlFrontend* frontend, ImprintAllocator* allocator,
-                         ImprintAllocatorWithFree* allocatorWithFree)
+/// Initializes a nimble engine client on a previously setup single datagram transport
+/// @param self
+/// @param app
+static void startJoiningOnClientTransport(NlAppClient* self, NlApp* app)
 {
     CLOG_DEBUG("start joining")
     app->phase = NlAppPhaseNetwork;
-    frontend->phase = NlFrontendPhaseJoining;
-
-    int errorCode = udpClientInit(&app->udpClient, "127.0.0.1", gameUdpPort);
-    if (errorCode < 0) {
-        CLOG_ERROR("could not start udp client")
-    }
-    CLOG_DEBUG("udp client is setup for connection")
-
-    udpTransportInit(&app->transportForClient, app, clientSideSend, clientSideReceive);
-
-    Clog nimbleBallClientLog;
-    nimbleBallClientLog.config = &g_clog;
-    nimbleBallClientLog.constantPrefix = "NimbleBallClient";
-
-    hazyDatagramTransportInOutInit(&app->hazyClientTransport, app->transportForClient, allocator, allocatorWithFree,
-                                   hazyConfigGoodCondition(), nimbleBallClientLog);
+    app->frontend.phase = NlFrontendPhaseJoining;
 
     CLOG_DEBUG("client datagram transport is set")
 
@@ -185,9 +151,9 @@ static void startJoining(NlApp* app, NlFrontend* frontend, ImprintAllocator* all
     };
 
     NimbleEngineClientSetup setup;
-    setup.memory = allocator;
-    setup.blobMemory = allocatorWithFree;
-    setup.transport = app->hazyClientTransport.transport;
+    setup.memory = app->allocator;
+    setup.blobMemory = app->allocatorWithFree;
+    setup.transport = self->singleTransport.singleTransport;
 
     setup.authoritative = app->authoritative.transmuteVm;
     setup.predicted = app->predicted.transmuteVm;
@@ -201,7 +167,7 @@ static void startJoining(NlApp* app, NlFrontend* frontend, ImprintAllocator* all
     nimbleEngineClientLog.constantPrefix = "NimbleEngineClient";
 
     setup.log = nimbleEngineClientLog;
-    nimbleEngineClientInit(&app->nimbleEngineClient, setup);
+    nimbleEngineClientInit(&self->nimbleEngineClient, setup);
 
     CLOG_DEBUG("nimble client is setup with transport")
 
@@ -209,37 +175,264 @@ static void startJoining(NlApp* app, NlFrontend* frontend, ImprintAllocator* all
     joinOptions.playerCount = useLocalPlayerCount;
     joinOptions.players[0].localIndex = 99;
     joinOptions.players[1].localIndex = 42;
-    nimbleEngineClientRequestJoin(&app->nimbleEngineClient, joinOptions);
+    nimbleEngineClientRequestJoin(&self->nimbleEngineClient, joinOptions);
 
-    app->nimbleEngineClient.isHostingLocally = app->isHosting;
+    self->nimbleEngineClient.isHostingLocally = app->nbdServerIsStarted;
 
     CLOG_DEBUG("nimble client is trying to join / rejoin server")
 }
 
-static void serverConsumeAllDatagrams(UdpServerConnections* udpServerWrapper, NbdServer* nimbleServer)
+/// Tries to create a room on a conclave transport
+/// @note not implemented yet
+/// @param app
+/// @param host
+/// @return
+static int startHostOnline(NlApp* app, NlAppHost* host)
 {
-    int connectionId;
-    uint8_t datagram[1200];
-    UdpTransportOut responseTransport;
+    if (host->multiTransport.mode == TransportStackModeConclave) {
+        ClvSerializeRoomCreateOptions createRoomOptions;
+        createRoomOptions.name = "New Room";
+        createRoomOptions.maxNumberOfPlayers = 4;
+        createRoomOptions.flags = 0;
+        clvClientRealizeCreateRoom(&host->multiTransport.conclave.conclaveClient, &createRoomOptions);
+    }
 
-    for (size_t i = 0; i < 32; ++i) {
-        bool didConnectNow = false;
-        int octetCountReceived = udpServerConnectionsReceive(udpServerWrapper, &connectionId, datagram, 1200,
-                                                             &didConnectNow, &responseTransport);
+    app->phase = NlAppPhaseNetwork;
+    app->frontend.phase = NlFrontendPhaseHostingOnline;
 
-        if (octetCountReceived == 0) {
-            return;
-        }
-        if (didConnectNow) {
-            nbdServerConnectionConnected(nimbleServer, connectionId);
-        }
-        NbdResponse response;
-        response.transportOut = &responseTransport;
-        int errorCode = nbdServerFeed(nimbleServer, connectionId, datagram, octetCountReceived, &response);
-        if (errorCode < 0) {
-            CLOG_ERROR("can not feed server")
+    return 0;
+}
+
+/// Initializes a multi datagram transport stack
+/// Used by the server
+/// @param multi
+/// @param mode
+static void initializeTransportStackMulti(TransportStackMulti* multi, TransportStackMode mode)
+{
+    Clog multiLog;
+    multiLog.config = &g_clog;
+    multiLog.constantPrefix = "multi";
+
+    transportStackMultiInit(multi, mode, multiLog);
+}
+
+/// Initializes a single datagram transport stack
+/// Used by the client only
+/// @param single
+/// @param mode
+/// @param allocator
+/// @param allocatorWithFree
+static void initializeTransportStackSingle(TransportStackSingle* single, TransportStackMode mode,
+                                           struct ImprintAllocator* allocator,
+                                           struct ImprintAllocatorWithFree* allocatorWithFree)
+{
+    Clog singleLog;
+    singleLog.config = &g_clog;
+    singleLog.constantPrefix = "single";
+
+    transportStackSingleInit(single, allocator, allocatorWithFree, mode, singleLog);
+}
+
+/// Handles menu selection when not actively trying to create, play or join a game
+/// @param app
+/// @param host
+/// @param client
+static void updateFrontendInIdle(NlApp* app, NlAppHost* host, NlAppClient* client)
+{
+    switch (app->frontend.mainMenuSelected) {
+        case NlFrontendMenuSelectJoin:
+            CLOG_DEBUG("Join a LAN game")
+            initializeTransportStackSingle(&client->singleTransport, TransportStackModeLocalUdp, app->allocator,
+                                           app->allocatorWithFree);
+            transportStackSingleConnect(&client->singleTransport, gameRelayHost, gameRelayPort);
+            startJoiningOnClientTransport(client, app);
+            break;
+        case NlFrontendMenuSelectHost:
+            CLOG_DEBUG("Host a LAN game")
+            initializeTransportStackMulti(&host->multiTransport, TransportStackModeLocalUdp);
+            transportStackMultiListen(&host->multiTransport, "", gameRelayPort);
+            startHostingOnMultiTransport(host, app);
+            initializeTransportStackSingle(&client->singleTransport, TransportStackModeLocalUdp, app->allocator,
+                                           app->allocatorWithFree);
+            transportStackSingleConnect(&client->singleTransport, gameRelayHost, gameRelayPort);
+            startJoiningOnClientTransport(client, app);
+            break;
+        case NlFrontendMenuSelectHostOnline:
+            CLOG_DEBUG("Join Online")
+            startHostOnline(app, host);
+            break;
+        case NlFrontendMenuSelectUnknown:
+        default:
+            break;
+    }
+}
+
+/// Not implemented yet
+/// @param app
+/// @param host
+/// @param client
+static void updateConclave(NlApp* app, NlAppHost* host, NlAppClient* client)
+{
+    ClvClientRealize* conclaveClient = &client->singleTransport.conclave.conclaveClient;
+    if (conclaveClient->state == ClvClientRealizeStateCreateRoom && !app->nbdServerIsStarted) {
+        startHostingOnMultiTransport(host, app);
+        startJoiningOnClientTransport(client, app);
+    }
+    if (app->frontend.phase == NlFrontendPhaseHostingOnline &&
+        conclaveClient->state == ClvClientRealizeStateCreateRoom) {
+        // We have created a room
+        app->frontend.phase = NlFrontendPhaseInGame;
+    }
+}
+
+/// Adds predicted input to the nimble engine client
+/// @param client
+static void addPredictedInput(NlAppClient* client)
+{
+    NlPlayerInput inputs[2];
+    inputs[0] = gamepadToPlayerInput(&client->gamepads[0]);
+    inputs[1] = gamepadToPlayerInput(&client->gamepads[1]);
+
+    uint8_t participantId[2];
+
+    participantId[0] = client->nimbleEngineClient.nimbleClient.client.localParticipantLookup[0].participantId;
+    TransmuteParticipantInput participantInputs[2];
+    participantInputs[0].input = &inputs[0];
+    participantInputs[0].octetSize = sizeof(inputs[0]);
+    participantInputs[0].participantId = participantId[0];
+
+    participantId[1] = client->nimbleEngineClient.nimbleClient.client.localParticipantLookup[1].participantId;
+    participantInputs[1].input = &inputs[1];
+    participantInputs[1].octetSize = sizeof(inputs[1]);
+    participantInputs[1].participantId = participantId[1];
+
+    TransmuteInput transmuteInput;
+    transmuteInput.participantInputs = participantInputs;
+    transmuteInput.participantCount = useLocalPlayerCount;
+
+    nimbleEngineClientAddPredictedInput(&client->nimbleEngineClient, &transmuteInput);
+}
+
+/// Sets the locally simulated game state to the local nimble server
+/// @param host
+/// @param client
+static void setGameStateToHost(NlAppHost* host, NlAppClient* client)
+{
+    StepId outStepId;
+    TransmuteState authoritativeState = assentGetState(&client->nimbleEngineClient.rectify.authoritative, &outStepId);
+    CLOG_ASSERT(authoritativeState.octetSize == sizeof(NlGame), "illegal authoritative state");
+    nbdServerSetGameState(&host->nimbleServer, authoritativeState.state, authoritativeState.octetSize, outStepId);
+}
+
+/// Update host
+/// @param host
+/// @param client
+static void updateHost(NlAppHost* host, NlAppClient* client)
+{
+    nbdServerUpdate(&host->nimbleServer, monotonicTimeMsNow());
+
+    if (client->nimbleEngineClient.phase == NimbleEngineClientPhaseSynced &&
+        nbdServerMustProvideGameState(&host->nimbleServer)) {
+        setGameStateToHost(host, client);
+    }
+}
+
+/// Update nimble engine client and, if hosting, the nimble engine server
+/// @param app
+/// @param host
+/// @param client
+static void updateInNetwork(NlApp* app, NlAppHost* host, NlAppClient* client)
+{
+    transportStackSingleUpdate(&client->singleTransport);
+    if (client->singleTransport.mode == TransportStackModeConclave) {
+        updateConclave(app, host, client);
+    }
+    nimbleEngineClientUpdate(&client->nimbleEngineClient);
+    if (client->nimbleEngineClient.phase == NimbleEngineClientPhaseSynced &&
+        client->nimbleEngineClient.nimbleClient.client.localParticipantCount > 0 &&
+        nimbleEngineClientMustAddPredictedInput(&client->nimbleEngineClient)) {
+        addPredictedInput(client);
+    }
+
+    if (app->nbdServerIsStarted) {
+        updateHost(host, client);
+    }
+}
+
+/// Presents the authoritative and predicted state (if available) and the front end.
+/// @param app
+/// @param client
+static void presentPredictedAndAuthoritativeStatesAndFrontend(const NlApp* app, NlAppClient* client)
+{
+    NlRenderStats renderStats;
+    const NlGame* authoritative;
+    const NlGame* predicted;
+
+    if (app->phase == NlAppPhaseNetwork && client->nimbleEngineClient.phase == NimbleEngineClientPhaseSynced) {
+        NimbleGameState authoritativeState;
+        NimbleGameState predictedState;
+
+        nimbleEngineClientGetGameStates(&client->nimbleEngineClient, &authoritativeState, &predictedState);
+
+        renderStats.authoritativeTickId = authoritativeState.tickId;
+        renderStats.predictedTickId = predictedState.tickId;
+
+        authoritative = (const NlGame*) authoritativeState.state.state;
+        predicted = (const NlGame*) predictedState.state.state;
+
+        CLOG_ASSERT(authoritativeState.state.octetSize == sizeof(NlGame), "internal error, wrong auth state size");
+        CLOG_ASSERT(predictedState.state.octetSize == sizeof(NlGame), "internal error, wrong state size");
+
+        NimbleEngineClientStats stats;
+        nimbleEngineClientGetStats(&client->nimbleEngineClient, &stats);
+
+        renderStats.authoritativeStepsInBuffer = stats.authoritativeBufferDeltaStat;
+    } else {
+        authoritative = 0;
+        predicted = 0;
+
+        renderStats.predictedTickId = 0;
+        renderStats.authoritativeTickId = 0;
+        renderStats.authoritativeStepsInBuffer = 0;
+    }
+
+    renderStats.renderFps = client->renderFps.avg;
+    renderStats.latencyMs = client->nimbleEngineClient.nimbleClient.client.latencyMsStat.avg;
+
+    srWindowRenderPrepare(&client->window, 0x115511);
+    if (authoritative != NULL && predicted != NULL) {
+        nlAudioUpdate(&client->audio, authoritative, predicted, 0, 0U);
+        nlRenderUpdate(&client->inGame, authoritative, predicted, 0, 0, renderStats);
+    }
+
+    nlFrontendRenderUpdate(&client->frontendRender, &app->frontend);
+
+    srWindowRenderPresent(&client->window);
+}
+
+/// Polls the gamepad and handle special function buttons
+/// Gamepads are currently they keyboard keys [w,a,s,d,space,left-shift] and [i,j,k,l,h]
+/// @param client
+/// @return true if the app should continue to run, false otherwise
+static bool pollInputAndHandleSpecialButtons(NlAppClient* client)
+{
+    int wantsToQuit = srGamepadPoll(client->gamepads, maxLocalPlayerCount);
+    if (wantsToQuit == 1) {
+        return false;
+    }
+
+    if (!client->menuPressedLast && client->gamepads[0].menu != 0) {
+        if (client->inGame.mode == NlRenderModeAuthoritative) {
+            CLOG_NOTICE("TOGGLE: PREDICTED!")
+            client->inGame.mode = NlRenderModePredicted;
+        } else {
+            CLOG_NOTICE("TOGGLE: AUTHORITATIVE!")
+            client->inGame.mode = NlRenderModeAuthoritative;
         }
     }
+    client->menuPressedLast = client->gamepads[0].menu;
+
+    return true;
 }
 
 int main(int argc, char* argv[])
@@ -249,34 +442,21 @@ int main(int argc, char* argv[])
 
     g_clog.log = clog_console;
     g_clog.level = CLOG_TYPE_DEBUG;
+
     CLOG_VERBOSE("Nimble Ball start!")
 
     ImprintDefaultSetup imprintDefaultSetup;
     imprintDefaultSetupInit(&imprintDefaultSetup, 5 * 1024 * 1024);
 
-    NlCombinedRender combinedRender;
-    nlFrontendInit(&combinedRender.frontend);
-
-    SrGamepad gamepads[2];
-
-    srGamepadInit(&gamepads[0]);
-    srGamepadInit(&gamepads[1]);
-
+    // App Initialization
     NlApp app;
-
-    statsIntPerSecondInit(&app.renderFps, monotonicTimeMsNow(), 1000);
-
-    srWindowInit(&app.window, 640, 360, "nimble ball");
-
-    srAudioInit(&app.mixer);
-
-    nlAudioInit(&app.audio, &app.mixer);
-
-    nlRenderInit(&combinedRender.inGame, app.window.renderer);
-    nlFrontendRenderInit(&combinedRender.frontendRender, &app.window, combinedRender.inGame.font);
-
+    nlFrontendInit(&app.frontend);
     app.phase = NlAppPhaseIdle;
-    app.isHosting = false;
+    app.nbdServerIsStarted = false;
+    app.allocator = &imprintDefaultSetup.tagAllocator.info;
+    app.allocatorWithFree = &imprintDefaultSetup.slabAllocator.info;
+    app.log.config = &g_clog;
+    app.log.constantPrefix = "App";
 
     Clog authoritativeLog;
     authoritativeLog.constantPrefix = "NimbleBallAuth";
@@ -288,139 +468,41 @@ int main(int argc, char* argv[])
     predictedLog.config = &g_clog;
     nlSimulationVmInit(&app.predicted, predictedLog);
 
-    bool menuPressedLast = false;
+    // Client Initialization
+    NlAppClient client;
+    srGamepadInit(&client.gamepads[0]);
+    srGamepadInit(&client.gamepads[1]);
+    client.menuPressedLast = false;
 
-    while (true) {
-        int wantsToQuit = srGamepadPoll(gamepads, maxLocalPlayerCount);
-        if (wantsToQuit == 1) {
-            break;
-        }
-        if (!menuPressedLast && gamepads[0].menu) {
-            if (combinedRender.inGame.mode == NlRenderModeAuthoritative) {
-                CLOG_NOTICE("TOGGLE: PREDICTED!")
-                combinedRender.inGame.mode = NlRenderModePredicted;
-            } else {
-                CLOG_NOTICE("TOGGLE: AUTHORITATIVE!")
-                combinedRender.inGame.mode = NlRenderModeAuthoritative;
-            }
-        }
-        menuPressedLast = gamepads[0].menu;
+    statsIntPerSecondInit(&client.renderFps, monotonicTimeMsNow(), 1000);
+    srWindowInit(&client.window, 640, 360, "nimble ball");
+    srAudioInit(&client.mixer);
+    nlAudioInit(&client.audio, &client.mixer);
+    nlRenderInit(&client.inGame, client.window.renderer);
+    nlFrontendRenderInit(&client.frontendRender, &client.window, client.inGame.font);
 
-        nlFrontendHandleInput(&combinedRender.frontend, &gamepads[0]);
+    // Host Initialization
+    NlAppHost host;
+
+    while (pollInputAndHandleSpecialButtons(&client)) {
+        nlFrontendHandleInput(&app.frontend, &client.gamepads[0]);
         switch (app.phase) {
             case NlAppPhaseIdle:
-                switch (combinedRender.frontend.mainMenuSelected) {
-                    case NlFrontendMenuSelectJoin:
-                        CLOG_DEBUG("Join a game")
-                        startJoining(&app, &combinedRender.frontend, &imprintDefaultSetup.tagAllocator.info,
-                                     &imprintDefaultSetup.slabAllocator.info);
-                        break;
-                    case NlFrontendMenuSelectHost:
-                        CLOG_DEBUG("Host a game")
-                        startHosting(&app, &combinedRender.frontend, &imprintDefaultSetup.tagAllocator.info,
-                                     &imprintDefaultSetup.slabAllocator.info);
-                        startJoining(&app, &combinedRender.frontend, &imprintDefaultSetup.tagAllocator.info,
-                                     &imprintDefaultSetup.slabAllocator.info);
-                        break;
-                    case NlFrontendMenuSelectUnknown:
-                    default:
-                        break;
-                }
+                updateFrontendInIdle(&app, &host, &client);
                 break;
 
             case NlAppPhaseNetwork: {
-                hazyDatagramTransportInOutUpdate(&app.hazyClientTransport);
-                nimbleEngineClientUpdate(&app.nimbleEngineClient);
-                if (app.nimbleEngineClient.phase == NimbleEngineClientPhaseSynced &&
-                    app.nimbleEngineClient.nimbleClient.client.localParticipantCount > 0 &&
-                    nimbleEngineClientMustAddPredictedInput(&app.nimbleEngineClient)) {
-                    NlPlayerInput inputs[2];
-                    inputs[0] = gamepadToPlayerInput(&gamepads[0]);
-                    inputs[1] = gamepadToPlayerInput(&gamepads[1]);
-
-                    uint8_t participantId[2];
-
-                    participantId[0] = app.nimbleEngineClient.nimbleClient.client.localParticipantLookup[0]
-                                           .participantId;
-                    TransmuteParticipantInput participantInputs[2];
-                    participantInputs[0].input = &inputs[0];
-                    participantInputs[0].octetSize = sizeof(inputs[0]);
-                    participantInputs[0].participantId = participantId[0];
-
-                    participantId[1] = app.nimbleEngineClient.nimbleClient.client.localParticipantLookup[1]
-                                           .participantId;
-                    participantInputs[1].input = &inputs[1];
-                    participantInputs[1].octetSize = sizeof(inputs[1]);
-                    participantInputs[1].participantId = participantId[1];
-
-                    TransmuteInput transmuteInput;
-                    transmuteInput.participantInputs = participantInputs;
-                    transmuteInput.participantCount = useLocalPlayerCount;
-
-                    nimbleEngineClientAddPredictedInput(&app.nimbleEngineClient, &transmuteInput);
-                }
-
-                if (app.isHosting) {
-                    nbdServerUpdate(&app.nimbleServer, monotonicTimeMsNow());
-                    serverConsumeAllDatagrams(&app.udpServerWrapper, &app.nimbleServer);
-
-                    if (app.nimbleEngineClient.phase == NimbleEngineClientPhaseSynced &&
-                        nbdServerMustProvideGameState(&app.nimbleServer)) {
-                        StepId outStepId;
-                        TransmuteState authoritativeState = assentGetState(
-                            &app.nimbleEngineClient.rectify.authoritative, &outStepId);
-                        CLOG_ASSERT(authoritativeState.octetSize == sizeof(NlGame), "illegal authoritative state");
-                        nbdServerSetGameState(&app.nimbleServer, authoritativeState.state, authoritativeState.octetSize,
-                                              outStepId);
-                    }
-                }
-            }
-
-            break;
+                updateInNetwork(&app, &host, &client);
+            } break;
         }
 
-        NlRenderStats renderStats;
-        if (app.phase == NlAppPhaseNetwork && app.nimbleEngineClient.phase == NimbleEngineClientPhaseSynced) {
-            NimbleGameState authoritativeState;
-            NimbleGameState predictedState;
+        presentPredictedAndAuthoritativeStatesAndFrontend(&app, &client);
 
-            nimbleEngineClientGetGameStates(&app.nimbleEngineClient, &authoritativeState, &predictedState);
-
-            renderStats.authoritativeTickId = authoritativeState.tickId;
-            renderStats.predictedTickId = predictedState.tickId;
-
-            combinedRender.authoritative = (const NlGame*) authoritativeState.state.state;
-            combinedRender.predicted = (const NlGame*) predictedState.state.state;
-
-            CLOG_ASSERT(authoritativeState.state.octetSize == sizeof(NlGame), "internal error, wrong auth state size");
-            CLOG_ASSERT(predictedState.state.octetSize == sizeof(NlGame), "internal error, wrong state size");
-
-            NimbleEngineClientStats stats;
-            nimbleEngineClientGetStats(&app.nimbleEngineClient, &stats);
-
-            renderStats.authoritativeStepsInBuffer = stats.authoritativeBufferDeltaStat;
-        } else {
-            combinedRender.authoritative = 0;
-            combinedRender.predicted = 0;
-
-            renderStats.predictedTickId = 0;
-            renderStats.authoritativeTickId = 0;
-            renderStats.authoritativeStepsInBuffer = 0;
-        }
-
-        renderStats.renderFps = app.renderFps.avg;
-        renderStats.latencyMs = app.nimbleEngineClient.nimbleClient.client.latencyMsStat.avg;
-        combinedRender.renderStats = renderStats;
-
-        srWindowRender(&app.window, 0x115511, &combinedRender, renderCallback);
-        statsIntPerSecondAdd(&app.renderFps, 1);
-        statsIntPerSecondUpdate(&app.renderFps, monotonicTimeMsNow());
-        if (combinedRender.authoritative != 0 && combinedRender.predicted != 0) {
-            nlAudioUpdate(&app.audio, combinedRender.authoritative, combinedRender.predicted, 0, 0U);
-        }
+        statsIntPerSecondAdd(&client.renderFps, 1);
+        statsIntPerSecondUpdate(&client.renderFps, monotonicTimeMsNow());
     }
 
-    nlRenderClose(&combinedRender.inGame);
-    srAudioClose(&app.mixer);
-    srWindowClose(&app.window);
+    nlRenderClose(&client.inGame);
+    srAudioClose(&client.mixer);
+    srWindowClose(&client.window);
 }

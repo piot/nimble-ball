@@ -84,7 +84,9 @@ target_include_directories(nimble_ball PRIVATE ${DEPS}piot/stats-c/src/include)
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/bit-array/src/include)
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/nimble-server-lib/src/include)
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/nimble-client-c/src/include)
-
+target_include_directories(nimble_ball PRIVATE ${DEPS}piot/conclave-client-c/src/include)
+target_include_directories(nimble_ball PRIVATE ${DEPS}piot/conclave-serialize-c/src/include)
+target_include_directories(nimble_ball PRIVATE ${DEPS}piot/transport-stack/src/include)
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/nimble-engine-client/src/include)
 
 target_include_directories(nimble_ball PRIVATE ../include)
