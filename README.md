@@ -50,3 +50,7 @@ cmake --build .
 ```console
 ./lib/nimble_ball
 ```
+
+* Use Keyboard `W`,`A`,`S`,`D`. Use `SPACE` for primary ability (and confirm selection in menu). Use `LEFT SHIFT` for secondary ability. Press `§` (key just left to `1`) to quit immediately.
+
+* Gameplay: Hold `SPACE` to build up power to shoot. Release `SPACE` to shoot. press `LEFT SHIFT` to do a slide tackle.
