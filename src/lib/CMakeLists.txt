@@ -22,8 +22,6 @@ endif ()
 
 set(DEPS ../../deps/)
 
-add_subdirectory("${DEPS}piot/udp-server-connections/src/lib/" temp)
-
 
 file(GLOB_RECURSE deps_src FOLLOW_SYMLINKS
         "${DEPS}*/*/src/lib/*.c"
@@ -49,7 +47,7 @@ target_link_libraries(nimble_ball PUBLIC SDL2::SDL2 SDL2_image::SDL2_image SDL2_
 
 if (WIN32)
 else ()
-    target_link_libraries(nimble_ball PUBLIC udp_server_connections m)
+    target_link_libraries(nimble_ball PUBLIC m)
 endif (WIN32)
 
 target_compile_options(nimble_ball PRIVATE -Wall -Wextra -Wshadow -Wstrict-aliasing -ansi -pedantic -Wno-declaration-after-statement -Wno-extra-semi-stmt -Wno-undef -Wno-unused-variable -Wno-unused-parameter -Wno-padded -Werror=implicit-function-declaration -Werror=incompatible-pointer-types -Werror=missing-prototypes -Werror=int-conversion -Werror=return-type -Werror=incompatible-function-pointer-types) # -Werror=incompatible-pointer-types-discards-qualifiers
@@ -88,5 +86,6 @@ target_include_directories(nimble_ball PRIVATE ${DEPS}piot/conclave-client-c/src
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/conclave-serialize-c/src/include)
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/transport-stack/src/include)
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/nimble-engine-client/src/include)
+target_include_directories(nimble_ball PRIVATE ${DEPS}piot/udp-server-connections/src/include)
 
 target_include_directories(nimble_ball PRIVATE ../include)
