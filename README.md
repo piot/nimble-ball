@@ -7,3 +7,7 @@ Uses:
 * [Nimble Ball Presentation](https://github.com/piot/nimble-ball-presentation)
   * [Sdl Render](https://github.com/piot/sdl-render)
 * [Nimble Ball Simulation](https://github.com/piot/nimble-ball-simulation)
+
+## Requirements
+
+Nimble Ball is using SdlRender for presentation, check out [Sdl Render](https://github.com/piot/sdl-render/#requirements) for list of requirements.
