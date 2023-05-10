@@ -14,6 +14,8 @@ Nimble Ball is using SdlRender for presentation, check out [Sdl Render](https://
 
 ## Build
 
+* Make sure [cmake](https://cmake.org/download/) is installed.
+> :warning: Do not use cmake `3.26.x`, since it is broken. Recommended to use `3.17.x` - `3.25.x`
 * Make sure [Go](https://go.dev/doc/install) is installed.
 * while in the nimble ball root directory, run:
 
