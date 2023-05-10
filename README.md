@@ -55,4 +55,6 @@ cmake --build .
 
 * Use Keyboard `W`,`A`,`S`,`D`. Use `SPACE` for primary ability (and confirm selection in menu). Use `LEFT SHIFT` for secondary ability. Press `§` (key just left to `1`) to quit immediately.
 
+* Select `Host LAN` and then optionally `Join LAN` on another client. Note only one host and client is supported in this version. `Host Online` and `Join Online` is under development, and is not working right now.
+
 * Gameplay: Hold `SPACE` to build up power to shoot. Release `SPACE` to shoot. press `LEFT SHIFT` to do a slide tackle.
