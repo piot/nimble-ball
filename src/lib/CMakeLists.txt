@@ -90,5 +90,6 @@ target_include_directories(nimble_ball PRIVATE ${DEPS}piot/secure-random-c/src/i
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/udp-server-connections/src/include)
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/udp-connections-serialize/src/include)
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/udp-connections-client-c/src/include)
+target_include_directories(nimble_ball PRIVATE ${DEPS}piot/lagometer-c/src/include)
 
 target_include_directories(nimble_ball PRIVATE ../include)

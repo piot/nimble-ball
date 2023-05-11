@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 #include "frontend.h"
 #include "frontend_render.h"
+#include "lagometer_render.h"
 #include <clog/console.h>
 #include <conclave-client/client.h>
 #include <conclave-client/network_realizer.h>
@@ -64,6 +65,7 @@ typedef struct NlAppClient {
     SrWindow window;
     NlRender inGame;
     NlFrontendRender frontendRender;
+    NlLagometerRender lagometerRender;
     StatsIntPerSecond renderFps;
     SrAudio mixer;
     NlAudio audio;
@@ -233,7 +235,8 @@ static void initializeTransportStackSingle(TransportStackSingle* single, Transpo
     transportStackSingleInit(single, allocator, allocatorWithFree, mode, singleLog);
 }
 
-static void initializeConnectMultiAndHost(NlApp* app, NlAppHost* host, const char* hostname, uint16_t port, TransportStackMode transportStackMode)
+static void initializeConnectMultiAndHost(NlApp* app, NlAppHost* host, const char* hostname, uint16_t port,
+                                          TransportStackMode transportStackMode)
 {
     initializeTransportStackMulti(&host->multiTransport, transportStackMode);
     transportStackMultiListen(&host->multiTransport, hostname, port);
@@ -413,6 +416,7 @@ static void presentPredictedAndAuthoritativeStatesAndFrontend(const NlApp* app, 
     if (authoritative != NULL && predicted != NULL) {
         nlAudioUpdate(&client->audio, authoritative, predicted, 0, 0U);
         nlRenderUpdate(&client->inGame, authoritative, predicted, 0, 0, renderStats);
+        nlLagometerRenderUpdate(&client->lagometerRender, &client->nimbleEngineClient.nimbleClient.client.lagometer);
     }
 
     nlFrontendRenderUpdate(&client->frontendRender, &app->frontend);
@@ -490,6 +494,7 @@ int main(int argc, char* argv[])
     nlAudioInit(&client.audio, &client.mixer);
     nlRenderInit(&client.inGame, client.window.renderer);
     nlFrontendRenderInit(&client.frontendRender, &client.window, client.inGame.font);
+    nlLagometerRenderInit(&client.lagometerRender, &client.window, client.inGame.font, &client.inGame.rectangleRender);
 
     // Host Initialization
     NlAppHost host;
