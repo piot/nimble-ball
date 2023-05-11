@@ -416,7 +416,12 @@ static void presentPredictedAndAuthoritativeStatesAndFrontend(const NlApp* app, 
     srWindowRenderPrepare(&client->window, 0x115511);
     if (authoritative != NULL && predicted != NULL) {
         nlAudioUpdate(&client->audio, authoritative, predicted, 0, 0U);
-        nlRenderUpdate(&client->inGame, authoritative, predicted, 0, 0, renderStats);
+        uint8_t localParticipantIds[4];
+        const NimbleClient* nimbleClient = &client->nimbleEngineClient.nimbleClient.client;
+        for (size_t i = 0; i<nimbleClient->localParticipantCount; ++i) {
+            localParticipantIds[i] = nimbleClient->localParticipantLookup[i].participantId;
+        }
+        nlRenderUpdate(&client->inGame, authoritative, predicted, localParticipantIds, nimbleClient->localParticipantCount, renderStats);
         nlLagometerRenderUpdate(&client->lagometerRender, &client->nimbleEngineClient.nimbleClient.client.lagometer);
     }
 
