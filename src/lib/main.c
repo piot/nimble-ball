@@ -62,6 +62,7 @@ typedef struct NlAppHost {
 /// Nimble client, transport stack and presentation
 typedef struct NlAppClient {
     SrGamepad gamepads[2];
+    SrFunctionKeys functionKeys;
     SrWindow window;
     NlRender inGame;
     NlFrontendRender frontendRender;
@@ -74,7 +75,7 @@ typedef struct NlAppClient {
     ImprintAllocatorWithFree* allocatorWithFree;
     NimbleEngineClient nimbleEngineClient;
     Clog log;
-    bool menuPressedLast;
+    SrFunctionKeys functionKeysPressedLast;
 } NlAppClient;
 
 /// Initializes the nimble server on the previously setup multi transport
@@ -430,12 +431,12 @@ static void presentPredictedAndAuthoritativeStatesAndFrontend(const NlApp* app, 
 /// @return true if the app should continue to run, false otherwise
 static bool pollInputAndHandleSpecialButtons(NlAppClient* client)
 {
-    int wantsToQuit = srGamepadPoll(client->gamepads, maxLocalPlayerCount);
+    int wantsToQuit = srGamepadPoll(client->gamepads, maxLocalPlayerCount, &client->functionKeys);
     if (wantsToQuit == 1) {
         return false;
     }
 
-    if (!client->menuPressedLast && client->gamepads[0].menu != 0) {
+    if (!client->functionKeysPressedLast.functionKeys[SR_KEY_F2] && client->functionKeys.functionKeys[SR_KEY_F2]) {
         if (client->inGame.mode == NlRenderModeAuthoritative) {
             CLOG_NOTICE("TOGGLE: PREDICTED!")
             client->inGame.mode = NlRenderModePredicted;
@@ -444,7 +445,19 @@ static bool pollInputAndHandleSpecialButtons(NlAppClient* client)
             client->inGame.mode = NlRenderModeAuthoritative;
         }
     }
-    client->menuPressedLast = client->gamepads[0].menu;
+
+    if (!client->functionKeysPressedLast.functionKeys[SR_KEY_F3] && client->functionKeys.functionKeys[SR_KEY_F3]) {
+        TransportStackInternetSimulationMode
+            newMode = (TransportStackInternetSimulationMode) (((int) client->singleTransport.conclave
+                                                                   .internetSimulationMode +
+                                                               1) %
+                                                              3);
+
+        transportStackSingleSetInternetSimulationMode(&client->singleTransport, newMode);
+        CLOG_NOTICE("internet simulation mode: %d", newMode)
+    }
+
+    client->functionKeysPressedLast = client->functionKeys;
 
     return true;
 }
@@ -486,7 +499,8 @@ int main(int argc, char* argv[])
     NlAppClient client;
     srGamepadInit(&client.gamepads[0]);
     srGamepadInit(&client.gamepads[1]);
-    client.menuPressedLast = false;
+    srFunctionKeysInit(&client.functionKeysPressedLast);
+    srFunctionKeysInit(&client.functionKeys);
 
     statsIntPerSecondInit(&client.renderFps, monotonicTimeMsNow(), 1000);
     srWindowInit(&client.window, 640, 360, "nimble ball");
