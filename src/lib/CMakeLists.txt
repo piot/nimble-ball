@@ -86,6 +86,9 @@ target_include_directories(nimble_ball PRIVATE ${DEPS}piot/conclave-client-c/src
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/conclave-serialize-c/src/include)
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/transport-stack/src/include)
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/nimble-engine-client/src/include)
+target_include_directories(nimble_ball PRIVATE ${DEPS}piot/secure-random-c/src/include)
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/udp-server-connections/src/include)
+target_include_directories(nimble_ball PRIVATE ${DEPS}piot/udp-connections-serialize/src/include)
+target_include_directories(nimble_ball PRIVATE ${DEPS}piot/udp-connections-client-c/src/include)
 
 target_include_directories(nimble_ball PRIVATE ../include)

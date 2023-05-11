@@ -233,6 +233,13 @@ static void initializeTransportStackSingle(TransportStackSingle* single, Transpo
     transportStackSingleInit(single, allocator, allocatorWithFree, mode, singleLog);
 }
 
+static void initializeConnectMultiAndHost(NlApp* app, NlAppHost* host, const char* hostname, uint16_t port, TransportStackMode transportStackMode)
+{
+    initializeTransportStackMulti(&host->multiTransport, transportStackMode);
+    transportStackMultiListen(&host->multiTransport, hostname, port);
+    startHostingOnMultiTransport(host, app);
+}
+
 /// Handles menu selection when not actively trying to create, play or join a game
 /// @param app
 /// @param host
@@ -249,17 +256,15 @@ static void updateFrontendInIdle(NlApp* app, NlAppHost* host, NlAppClient* clien
             break;
         case NlFrontendMenuSelectHost:
             CLOG_DEBUG("Host a LAN game")
-            initializeTransportStackMulti(&host->multiTransport, TransportStackModeLocalUdp);
-            transportStackMultiListen(&host->multiTransport, "", gameRelayPort);
-            startHostingOnMultiTransport(host, app);
+            initializeConnectMultiAndHost(app, host, "", gameRelayPort, TransportStackModeLocalUdp);
             initializeTransportStackSingle(&client->singleTransport, TransportStackModeLocalUdp, app->allocator,
                                            app->allocatorWithFree);
             transportStackSingleConnect(&client->singleTransport, gameRelayHost, gameRelayPort);
             startJoiningOnClientTransport(client, app);
             break;
         case NlFrontendMenuSelectHostOnline:
-            CLOG_DEBUG("Join Online")
-            startHostOnline(app, host);
+            CLOG_DEBUG("Host Online")
+            initializeConnectMultiAndHost(app, host, gameRelayHost, gameRelayPort, TransportStackModeConclave);
             break;
         case NlFrontendMenuSelectUnknown:
         default:
@@ -347,7 +352,12 @@ static void updateInNetwork(NlApp* app, NlAppHost* host, NlAppClient* client)
     if (client->singleTransport.mode == TransportStackModeConclave) {
         updateConclave(app, host, client);
     }
-    nimbleEngineClientUpdate(&client->nimbleEngineClient);
+    if (transportStackSingleIsConnected(&client->singleTransport)) {
+        nimbleEngineClientUpdate(&client->nimbleEngineClient);
+    } else {
+        uint8_t buf[1200];
+        udpTransportReceive(&client->singleTransport.singleTransport, buf, 1200);
+    }
     if (client->nimbleEngineClient.phase == NimbleEngineClientPhaseSynced &&
         client->nimbleEngineClient.nimbleClient.client.localParticipantCount > 0 &&
         nimbleEngineClientMustAddPredictedInput(&client->nimbleEngineClient)) {
