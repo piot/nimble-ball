@@ -298,22 +298,30 @@ static void updateConclave(NlApp* app, NlAppHost* host, NlAppClient* client)
 /// @param client
 static void addPredictedInput(NlAppClient* client)
 {
-    NlPlayerInput inputs[2];
-    inputs[0] = gamepadToPlayerInput(&client->gamepads[0]);
-    inputs[1] = gamepadToPlayerInput(&client->gamepads[1]);
-
-    uint8_t participantId[2];
-
-    participantId[0] = client->nimbleEngineClient.nimbleClient.client.localParticipantLookup[0].participantId;
+    NlPlayerInput inputs[NLR_MAX_LOCAL_PLAYERS];
+    uint8_t participantId[NLR_MAX_LOCAL_PLAYERS];
     TransmuteParticipantInput participantInputs[2];
-    participantInputs[0].input = &inputs[0];
-    participantInputs[0].octetSize = sizeof(inputs[0]);
-    participantInputs[0].participantId = participantId[0];
 
-    participantId[1] = client->nimbleEngineClient.nimbleClient.client.localParticipantLookup[1].participantId;
-    participantInputs[1].input = &inputs[1];
-    participantInputs[1].octetSize = sizeof(inputs[1]);
-    participantInputs[1].participantId = participantId[1];
+    StepId outStepId;
+    TransmuteState authoritativeState = assentGetState(&client->nimbleEngineClient.rectify.authoritative, &outStepId);
+
+    const NlGame* authoritative = (const NlGame*) authoritativeState.state;
+    for (size_t i = 0U; i < useLocalPlayerCount; ++i) {
+        participantId[i] = client->nimbleEngineClient.nimbleClient.client.localParticipantLookup[i].participantId;
+        NlrLocalPlayer* renderLocalPlayer = nlRenderFindLocalPlayerFromParticipantId(&client->inGame, participantId[i]);
+        const NlPlayer* simulationPlayer = nlGameFindSimulationPlayerFromParticipantId(authoritative, participantId[i]);
+        if (simulationPlayer != 0 && simulationPlayer->phase == NlPlayerPhaseSelectTeam &&
+            renderLocalPlayer != NULL && renderLocalPlayer->selectedTeamIndex != NL_TEAM_UNDEFINED) {
+            inputs[i].inputType = NlPlayerInputTypeSelectTeam;
+            inputs[i].input.selectTeam.preferredTeamToJoin = renderLocalPlayer->selectedTeamIndex;
+            CLOG_INFO("sent selected team %d", inputs[i].input.selectTeam.preferredTeamToJoin)
+        } else {
+            inputs[i] = gamepadToPlayerInput(&client->gamepads[0]);
+        }
+        participantInputs[i].input = &inputs[i];
+        participantInputs[i].octetSize = sizeof(inputs[i]);
+        participantInputs[i].participantId = participantId[i];
+    }
 
     TransmuteInput transmuteInput;
     transmuteInput.participantInputs = participantInputs;
@@ -418,10 +426,14 @@ static void presentPredictedAndAuthoritativeStatesAndFrontend(const NlApp* app, 
         nlAudioUpdate(&client->audio, authoritative, predicted, 0, 0U);
         uint8_t localParticipantIds[4];
         const NimbleClient* nimbleClient = &client->nimbleEngineClient.nimbleClient.client;
-        for (size_t i = 0; i<nimbleClient->localParticipantCount; ++i) {
+        for (size_t i = 0; i < nimbleClient->localParticipantCount; ++i) {
             localParticipantIds[i] = nimbleClient->localParticipantLookup[i].participantId;
         }
-        nlRenderUpdate(&client->inGame, authoritative, predicted, localParticipantIds, nimbleClient->localParticipantCount, renderStats);
+        nlRenderFeedInput(&client->inGame, client->gamepads, predicted, localParticipantIds,
+                          nimbleClient->localParticipantCount);
+
+        nlRenderUpdate(&client->inGame, authoritative, predicted, localParticipantIds,
+                       nimbleClient->localParticipantCount, renderStats);
         nlLagometerRenderUpdate(&client->lagometerRender, &client->nimbleEngineClient.nimbleClient.client.lagometer);
     }
 
