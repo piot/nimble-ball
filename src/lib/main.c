@@ -20,6 +20,7 @@
 
 const size_t gameRelayPort = 27003U;
 const char* gameRelayHost = "127.0.0.1";
+const char* gameRelayDevHost = "gamerelay.dev";
 
 clog_config g_clog;
 
@@ -209,13 +210,15 @@ static int startHostOnline(NlApp* app, NlAppHost* host)
 /// Used by the server
 /// @param multi
 /// @param mode
-static void initializeTransportStackMulti(TransportStackMulti* multi, TransportStackMode mode)
+static void initializeTransportStackMulti(TransportStackMulti* multi, TransportStackMode mode,
+                                          struct ImprintAllocator* allocator,
+                                          struct ImprintAllocatorWithFree* allocatorWithFree)
 {
     Clog multiLog;
     multiLog.config = &g_clog;
     multiLog.constantPrefix = "multi";
 
-    transportStackMultiInit(multi, mode, multiLog);
+    transportStackMultiInit(multi, allocator, allocatorWithFree, mode, multiLog);
 }
 
 /// Initializes a single datagram transport stack
@@ -236,9 +239,10 @@ static void initializeTransportStackSingle(TransportStackSingle* single, Transpo
 }
 
 static void initializeConnectMultiAndHost(NlApp* app, NlAppHost* host, const char* hostname, uint16_t port,
-                                          TransportStackMode transportStackMode)
+                                          TransportStackMode transportStackMode, struct ImprintAllocator* allocator,
+                                          struct ImprintAllocatorWithFree* allocatorWithFree)
 {
-    initializeTransportStackMulti(&host->multiTransport, transportStackMode);
+    initializeTransportStackMulti(&host->multiTransport, transportStackMode, allocator, allocatorWithFree);
     transportStackMultiListen(&host->multiTransport, hostname, port);
     startHostingOnMultiTransport(host, app);
 }
@@ -259,7 +263,8 @@ static void updateFrontendInIdle(NlApp* app, NlAppHost* host, NlAppClient* clien
             break;
         case NlFrontendMenuSelectHost:
             CLOG_DEBUG("Host a LAN game")
-            initializeConnectMultiAndHost(app, host, "", gameRelayPort, TransportStackModeLocalUdp);
+            initializeConnectMultiAndHost(app, host, "", gameRelayPort, TransportStackModeLocalUdp, app->allocator,
+                                          app->allocatorWithFree);
             initializeTransportStackSingle(&client->singleTransport, TransportStackModeLocalUdp, app->allocator,
                                            app->allocatorWithFree);
             transportStackSingleConnect(&client->singleTransport, gameRelayHost, gameRelayPort);
@@ -267,7 +272,13 @@ static void updateFrontendInIdle(NlApp* app, NlAppHost* host, NlAppClient* clien
             break;
         case NlFrontendMenuSelectHostOnline:
             CLOG_DEBUG("Host Online")
-            initializeConnectMultiAndHost(app, host, gameRelayHost, gameRelayPort, TransportStackModeConclave);
+            initializeConnectMultiAndHost(app, host, gameRelayDevHost, gameRelayPort, TransportStackModeConclave,
+                                          app->allocator, app->allocatorWithFree);
+            startHostOnline(app, host);
+
+            initializeTransportStackSingle(&client->singleTransport, TransportStackModeConclave, app->allocator,
+                                           app->allocatorWithFree);
+            transportStackSingleConnect(&client->singleTransport, gameRelayDevHost, gameRelayPort);
             break;
         case NlFrontendMenuSelectUnknown:
         default:
@@ -309,8 +320,8 @@ static void addPredictedInput(NlAppClient* client)
         participantId[i] = client->nimbleEngineClient.nimbleClient.client.localParticipantLookup[i].participantId;
         NlrLocalPlayer* renderLocalPlayer = nlRenderFindLocalPlayerFromParticipantId(&client->inGame, participantId[i]);
         const NlPlayer* simulationPlayer = nlGameFindSimulationPlayerFromParticipantId(authoritative, participantId[i]);
-        if (simulationPlayer != 0 && simulationPlayer->phase == NlPlayerPhaseSelectTeam &&
-            renderLocalPlayer != NULL && renderLocalPlayer->selectedTeamIndex != NL_TEAM_UNDEFINED) {
+        if (simulationPlayer != 0 && simulationPlayer->phase == NlPlayerPhaseSelectTeam && renderLocalPlayer != NULL &&
+            renderLocalPlayer->selectedTeamIndex != NL_TEAM_UNDEFINED) {
             inputs[i].inputType = NlPlayerInputTypeSelectTeam;
             inputs[i].input.selectTeam.preferredTeamToJoin = renderLocalPlayer->selectedTeamIndex;
             CLOG_INFO("sent selected team %d", inputs[i].input.selectTeam.preferredTeamToJoin)
@@ -345,6 +356,7 @@ static void setGameStateToHost(NlAppHost* host, NlAppClient* client)
 /// @param client
 static void updateHost(NlAppHost* host, NlAppClient* client)
 {
+    transportStackMultiUpdate(&host->multiTransport);
     nbdServerUpdate(&host->nimbleServer, monotonicTimeMsNow());
 
     if (client->nimbleEngineClient.phase == NimbleEngineClientPhaseSynced &&
