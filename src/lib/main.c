@@ -15,7 +15,6 @@
 #include <nimble-engine-client/client.h>
 #include <nimble-server/participant_connection.h>
 #include <nimble-server/server.h>
-#include <sdl-render/gamepad.h>
 #include <transport-stack/multi.h>
 #include <transport-stack/single.h>
 

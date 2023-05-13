@@ -91,5 +91,6 @@ target_include_directories(nimble_ball PRIVATE ${DEPS}piot/udp-server-connection
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/udp-connections-serialize/src/include)
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/udp-connections-client-c/src/include)
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/lagometer-c/src/include)
+target_include_directories(nimble_ball PRIVATE ${DEPS}piot/time-tick-c/src/include)
 
 target_include_directories(nimble_ball PRIVATE ../include)

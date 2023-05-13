@@ -47,3 +47,7 @@ version = "*"
 [[dependencies]]
 name = "piot/transport-stack"
 version = "*"
+
+[[dependencies]]
+name = "piot/time-tick-c"
+version = "*"
