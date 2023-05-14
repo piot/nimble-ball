@@ -72,7 +72,7 @@ target_include_directories(nimble_ball PRIVATE ${DEPS}piot/udp-client-c/src/incl
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/hazy-c/src/include)
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/basal-c/src/include)
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/monotonic-time-c/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/udp-transport/src/include)
+target_include_directories(nimble_ball PRIVATE ${DEPS}piot/datagram-transport-c/src/include)
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/nimble-ball-simulation/src/include)
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/nimble-ball-presentation/src/include)
 target_include_directories(nimble_ball PRIVATE ${DEPS}piot/nimble-serialize-c/src/include)
