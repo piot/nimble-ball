@@ -5,6 +5,7 @@
 #include "frontend.h"
 #include "frontend_render.h"
 #include "lagometer_render.h"
+#include "network_icons_render.h"
 #include <clog/console.h>
 #include <conclave-client/client.h>
 #include <conclave-client/network_realizer.h>
@@ -67,6 +68,7 @@ typedef struct NlAppClient {
     NlRender inGame;
     NlFrontendRender frontendRender;
     NlLagometerRender lagometerRender;
+    NlNetworkIconsRender networkIconsRender;
     StatsIntPerSecond renderFps;
     SrAudio mixer;
     NlAudio audio;
@@ -127,7 +129,7 @@ static void startHostingOnMultiTransport(NlAppHost* self, NlApp* app)
     // Since the whole game is blittable structs with no pointers, we can just cast it to an (uint8_t*)
     StepId stepId = 0xcafeU;
     nimbleServerReInitWithGame(&self->nimbleServer, (const uint8_t*) &initialServerState, sizeof(initialServerState),
-                            stepId, monotonicTimeMsNow());
+                               stepId, monotonicTimeMsNow());
 
     CLOG_INFO("nimble server has initial game state. octet count: %zu", self->nimbleServer.game.latestState.octetCount)
     app->nimbleServerIsStarted = true;
@@ -328,13 +330,13 @@ static void updateConclaveClient(NlApp* app, NlAppHost* host, NlAppClient* clien
     }
      */
 
-
     if (conclaveForClient->state == ClvClientRealizeStateListRoomsDone) {
         ClvSerializeRoomJoinOptions joinRoomOptions;
         if (conclaveForClient->client.listRoomsResponseOptions.roomInfoCount == 0) {
             CLOG_C_SOFT_ERROR(&client->log, "no rooms found")
         } else {
-            const ClvSerializeRoomInfo* firstRoomInfo = &conclaveForClient->client.listRoomsResponseOptions.roomInfos[0];
+            const ClvSerializeRoomInfo* firstRoomInfo = &conclaveForClient->client.listRoomsResponseOptions
+                                                             .roomInfos[0];
             CLOG_C_INFO(&client->log, "joining first room found %08lX '%s'", firstRoomInfo->roomId,
                         firstRoomInfo->roomName)
             joinRoomOptions.roomIdToJoin = firstRoomInfo->roomId;
@@ -351,7 +353,6 @@ static void updateConclaveClient(NlApp* app, NlAppHost* host, NlAppClient* clien
     }
 }
 
-
 /// Not implemented yet
 /// @param app
 /// @param host
@@ -367,7 +368,6 @@ static void updateConclaveServer(NlApp* app, NlAppHost* host, NlAppClient* clien
         app->frontend.phase = NlFrontendPhaseInGame;
     }
 }
-
 
 /// Adds predicted input to the nimble engine client
 /// @param client
@@ -519,6 +519,12 @@ static void presentPredictedAndAuthoritativeStatesAndFrontend(const NlApp* app, 
 
     nlFrontendRenderUpdate(&client->frontendRender, &app->frontend);
 
+    NlNetworkIconsState iconsState;
+    iconsState.authoritativeTimeIntervalWarning = client->nimbleEngineClient.detectedGapInAuthoritativeSteps
+                                                      .isOrWasTrue;
+    iconsState.droppedDatagram = client->nimbleEngineClient.nimbleClient.client.droppingDatagramWarning.isOrWasTrue;
+    nlNetworkIconsRenderUpdate(&client->networkIconsRender, iconsState);
+
     srWindowRenderPresent(&client->window);
 }
 
@@ -565,7 +571,7 @@ int main(int argc, char* argv[])
     (void) argv;
 
     g_clog.log = clog_console;
-    g_clog.level = CLOG_TYPE_VERBOSE;
+    g_clog.level = CLOG_TYPE_DEBUG;
 
     CLOG_VERBOSE("Nimble Ball start!")
 
@@ -606,6 +612,8 @@ int main(int argc, char* argv[])
     nlRenderInit(&client.inGame, client.window.renderer);
     nlFrontendRenderInit(&client.frontendRender, &client.window, client.inGame.font);
     nlLagometerRenderInit(&client.lagometerRender, &client.window, client.inGame.font, &client.inGame.rectangleRender);
+    nlNetworkIconsRenderInit(&client.networkIconsRender, &client.inGame.spriteRender,
+                             client.inGame.jerseySprite[0].texture);
     client.log = app.log;
 
     // Host Initialization

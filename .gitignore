@@ -13,3 +13,4 @@ Makefile
 *.a
 *.cmake
 CMakeCache.txt
+src/lib/nimble_ball
