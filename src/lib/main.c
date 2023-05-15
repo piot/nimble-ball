@@ -49,12 +49,12 @@ typedef struct NlApp {
     NlSimulationVm authoritative;
     NlSimulationVm predicted;
     NlFrontend frontend;
-    bool nbdServerIsStarted;
+    bool nimbleServerIsStarted;
 } NlApp;
 
 /// Nimble server and transport stack
 typedef struct NlAppHost {
-    NbdServer nimbleServer;
+    NimbleServer nimbleServer;
     TransportStackMulti multiTransport;
     Clog log;
 } NlAppHost;
@@ -100,9 +100,9 @@ static void startHostingOnMultiTransport(NlAppHost* self, NlApp* app)
 
     Clog serverLog;
     serverLog.config = &g_clog;
-    serverLog.constantPrefix = "NbdServer";
+    serverLog.constantPrefix = "NimbleServer";
 
-    NbdServerSetup serverSetup;
+    NimbleServerSetup serverSetup;
     serverSetup.maxSingleParticipantStepOctetCount = maxSingleParticipantStepOctetCount;
     serverSetup.maxParticipantCount = maxParticipantCount;
     serverSetup.maxConnectionCount = maxConnectionCount;
@@ -114,7 +114,7 @@ static void startHostingOnMultiTransport(NlAppHost* self, NlApp* app)
     serverSetup.now = monotonicTimeMsNow();
     serverSetup.log = serverLog;
     serverSetup.multiTransport = self->multiTransport.multiTransport;
-    int errorCode = nbdServerInit(&self->nimbleServer, serverSetup);
+    int errorCode = nimbleServerInit(&self->nimbleServer, serverSetup);
     if (errorCode < 0) {
         CLOG_ERROR("could not initialize nimble server %d", errorCode)
     }
@@ -126,11 +126,11 @@ static void startHostingOnMultiTransport(NlAppHost* self, NlApp* app)
     // with specific rules or game mode or similar
     // Since the whole game is blittable structs with no pointers, we can just cast it to an (uint8_t*)
     StepId stepId = 0xcafeU;
-    nbdServerReInitWithGame(&self->nimbleServer, (const uint8_t*) &initialServerState, sizeof(initialServerState),
+    nimbleServerReInitWithGame(&self->nimbleServer, (const uint8_t*) &initialServerState, sizeof(initialServerState),
                             stepId, monotonicTimeMsNow());
 
     CLOG_INFO("nimble server has initial game state. octet count: %zu", self->nimbleServer.game.latestState.octetCount)
-    app->nbdServerIsStarted = true;
+    app->nimbleServerIsStarted = true;
 }
 
 const int maxLocalPlayerCount = 2;
@@ -180,7 +180,7 @@ static void startJoiningOnClientTransport(NlAppClient* self, NlApp* app)
     joinOptions.players[1].localIndex = 42;
     nimbleEngineClientRequestJoin(&self->nimbleEngineClient, joinOptions);
 
-    self->nimbleEngineClient.isHostingLocally = app->nbdServerIsStarted;
+    self->nimbleEngineClient.isHostingLocally = app->nimbleServerIsStarted;
 
     CLOG_DEBUG("nimble client is trying to join / rejoin server")
 }
@@ -322,7 +322,7 @@ static void updateConclaveClient(NlApp* app, NlAppHost* host, NlAppClient* clien
 {
     ClvClientRealize* conclaveForClient = &client->singleTransport.conclave.conclaveClient;
     /*
-    if (conclaveForClient->state == ClvClientRealizeStateCreateRoom && !app->nbdServerIsStarted) {
+    if (conclaveForClient->state == ClvClientRealizeStateCreateRoom && !app->nimbleServerIsStarted) {
         startHostingOnMultiTransport(host, app);
         startJoiningOnClientTransport(client, app);
     }
@@ -413,7 +413,7 @@ static void setGameStateToHost(NlAppHost* host, NlAppClient* client)
     StepId outStepId;
     TransmuteState authoritativeState = assentGetState(&client->nimbleEngineClient.rectify.authoritative, &outStepId);
     CLOG_ASSERT(authoritativeState.octetSize == sizeof(NlGame), "illegal authoritative state");
-    nbdServerSetGameState(&host->nimbleServer, authoritativeState.state, authoritativeState.octetSize, outStepId);
+    nimbleServerSetGameState(&host->nimbleServer, authoritativeState.state, authoritativeState.octetSize, outStepId);
 }
 
 /// Update host
@@ -422,10 +422,10 @@ static void setGameStateToHost(NlAppHost* host, NlAppClient* client)
 static void updateHost(NlAppHost* host, NlAppClient* client)
 {
     transportStackMultiUpdate(&host->multiTransport);
-    nbdServerUpdate(&host->nimbleServer, monotonicTimeMsNow());
+    nimbleServerUpdate(&host->nimbleServer, monotonicTimeMsNow());
 
     if (client->nimbleEngineClient.phase == NimbleEngineClientPhaseSynced &&
-        nbdServerMustProvideGameState(&host->nimbleServer)) {
+        nimbleServerMustProvideGameState(&host->nimbleServer)) {
         setGameStateToHost(host, client);
     }
 }
@@ -456,7 +456,7 @@ static void updateInNetwork(NlApp* app, NlAppHost* host, NlAppClient* client)
         addPredictedInput(client);
     }
 
-    if (app->nbdServerIsStarted) {
+    if (app->nimbleServerIsStarted) {
         updateHost(host, client);
     }
 }
@@ -576,7 +576,7 @@ int main(int argc, char* argv[])
     NlApp app;
     nlFrontendInit(&app.frontend);
     app.phase = NlAppPhaseIdle;
-    app.nbdServerIsStarted = false;
+    app.nimbleServerIsStarted = false;
     app.allocator = &imprintDefaultSetup.tagAllocator.info;
     app.allocatorWithFree = &imprintDefaultSetup.slabAllocator.info;
     app.log.config = &g_clog;
