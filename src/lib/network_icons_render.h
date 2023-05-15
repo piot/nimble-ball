@@ -15,11 +15,13 @@ typedef struct NlNetworkIconsRender {
     struct SrSprites* spritesRender;
     SrSprite droppedDatagramSprite;
     SrSprite authoritativeTimeIntervalWarningSprite;
+    SrSprite impendingDisconnectWarningSprite;
 } NlNetworkIconsRender;
 
 typedef struct NlNetworkIconsState {
     bool droppedDatagram;
     bool authoritativeTimeIntervalWarning;
+    bool impendingDisconnectWarning;
 } NlNetworkIconsState;
 
 void nlNetworkIconsRenderInit(NlNetworkIconsRender* self, struct SrSprites* spritesRender, SDL_Texture* texture);

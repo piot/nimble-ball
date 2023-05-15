@@ -523,6 +523,9 @@ static void presentPredictedAndAuthoritativeStatesAndFrontend(const NlApp* app, 
     iconsState.authoritativeTimeIntervalWarning = client->nimbleEngineClient.detectedGapInAuthoritativeSteps
                                                       .isOrWasTrue;
     iconsState.droppedDatagram = client->nimbleEngineClient.nimbleClient.client.droppingDatagramWarning.isOrWasTrue;
+    iconsState.impendingDisconnectWarning = client->nimbleEngineClient.nimbleClient.client.impendingDisconnectWarning
+                                                .isOrWasTrue |
+                                            client->nimbleEngineClient.bigGapInAuthoritativeSteps.isOrWasTrue;
     nlNetworkIconsRenderUpdate(&client->networkIconsRender, iconsState);
 
     srWindowRenderPresent(&client->window);

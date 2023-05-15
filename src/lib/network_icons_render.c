@@ -22,11 +22,22 @@ static void setupAuthoritativeTimeIntervalWarningSprite(SrSprite* sprite, SDL_Te
     sprite->texture = texture;
 }
 
+static void setupImpendingDisconnectSprite(SrSprite* sprite, SDL_Texture* texture)
+{
+    sprite->rect.x = 64;
+    sprite->rect.y = 80;
+    sprite->rect.w = 32;
+    sprite->rect.h = 32;
+    sprite->texture = texture;
+}
+
+
 void nlNetworkIconsRenderInit(NlNetworkIconsRender* self, struct SrSprites* spritesRender, SDL_Texture* texture)
 {
     self->spritesRender = spritesRender;
     setupDroppedDatagramSprite(&self->droppedDatagramSprite, texture);
     setupAuthoritativeTimeIntervalWarningSprite(&self->authoritativeTimeIntervalWarningSprite, texture);
+    setupImpendingDisconnectSprite(&self->impendingDisconnectWarningSprite, texture);
 }
 
 void nlNetworkIconsRenderUpdate(NlNetworkIconsRender* self, NlNetworkIconsState state)
@@ -42,6 +53,13 @@ void nlNetworkIconsRenderUpdate(NlNetworkIconsRender* self, NlNetworkIconsState 
 
     if (state.authoritativeTimeIntervalWarning) {
         srSpritesCopyEx(self->spritesRender, &self->authoritativeTimeIntervalWarningSprite, x, y, 0, 1.0f,
+                        SDL_ALPHA_OPAQUE);
+    }
+
+    y -= 40;
+
+    if (state.impendingDisconnectWarning) {
+        srSpritesCopyEx(self->spritesRender, &self->impendingDisconnectWarningSprite, x, y, 0, 1.0f,
                         SDL_ALPHA_OPAQUE);
     }
 }
