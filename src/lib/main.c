@@ -523,9 +523,16 @@ static void presentPredictedAndAuthoritativeStatesAndFrontend(const NlApp* app, 
     iconsState.authoritativeTimeIntervalWarning = client->nimbleEngineClient.detectedGapInAuthoritativeSteps
                                                       .isOrWasTrue;
     iconsState.droppedDatagram = client->nimbleEngineClient.nimbleClient.client.droppingDatagramWarning.isOrWasTrue;
-    iconsState.impendingDisconnectWarning = client->nimbleEngineClient.nimbleClient.client.impendingDisconnectWarning
-                                                .isOrWasTrue |
-                                            client->nimbleEngineClient.bigGapInAuthoritativeSteps.isOrWasTrue;
+    iconsState.disconnectInfo = NlNetworkIconsDisconnectInfoNone;
+    if (client->nimbleEngineClient.nimbleClient.state == NimbleClientRealizeStateDisconnected) {
+        iconsState.disconnectInfo = NlNetworkIconsDisconnectDisconnected;
+    } else {
+        bool impending = client->nimbleEngineClient.nimbleClient.client.impendingDisconnectWarning.isOrWasTrue |
+                         client->nimbleEngineClient.bigGapInAuthoritativeSteps.isOrWasTrue;
+        if (impending) {
+            iconsState.disconnectInfo = NlNetworkIconsDisconnectImpending;
+        }
+    }
     nlNetworkIconsRenderUpdate(&client->networkIconsRender, iconsState);
 
     srWindowRenderPresent(&client->window);
@@ -561,6 +568,11 @@ static bool pollInputAndHandleSpecialButtons(NlAppClient* client)
 
         transportStackSingleSetInternetSimulationMode(&client->singleTransport, newMode);
         CLOG_NOTICE("internet simulation mode: %d", newMode)
+    }
+
+    if (!client->functionKeysPressedLast.functionKeys[SR_KEY_F4] && client->functionKeys.functionKeys[SR_KEY_F4]) {
+        hazyDatagramTransportDebugDiscardIncoming(&client->singleTransport.conclave.hazyTransport);
+        CLOG_NOTICE("stopping incoming hazy transport");
     }
 
     client->functionKeysPressedLast = client->functionKeys;

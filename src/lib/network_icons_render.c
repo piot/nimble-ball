@@ -31,6 +31,14 @@ static void setupImpendingDisconnectSprite(SrSprite* sprite, SDL_Texture* textur
     sprite->texture = texture;
 }
 
+static void setupDisconnectedSprite(SrSprite* sprite, SDL_Texture* texture)
+{
+    sprite->rect.x = 96;
+    sprite->rect.y = 80;
+    sprite->rect.w = 32;
+    sprite->rect.h = 32;
+    sprite->texture = texture;
+}
 
 void nlNetworkIconsRenderInit(NlNetworkIconsRender* self, struct SrSprites* spritesRender, SDL_Texture* texture)
 {
@@ -38,6 +46,7 @@ void nlNetworkIconsRenderInit(NlNetworkIconsRender* self, struct SrSprites* spri
     setupDroppedDatagramSprite(&self->droppedDatagramSprite, texture);
     setupAuthoritativeTimeIntervalWarningSprite(&self->authoritativeTimeIntervalWarningSprite, texture);
     setupImpendingDisconnectSprite(&self->impendingDisconnectWarningSprite, texture);
+    setupDisconnectedSprite(&self->disconnectedSprite, texture);
 }
 
 void nlNetworkIconsRenderUpdate(NlNetworkIconsRender* self, NlNetworkIconsState state)
@@ -58,8 +67,15 @@ void nlNetworkIconsRenderUpdate(NlNetworkIconsRender* self, NlNetworkIconsState 
 
     y -= 40;
 
-    if (state.impendingDisconnectWarning) {
-        srSpritesCopyEx(self->spritesRender, &self->impendingDisconnectWarningSprite, x, y, 0, 1.0f,
-                        SDL_ALPHA_OPAQUE);
+    switch (state.disconnectInfo) {
+        case NlNetworkIconsDisconnectDisconnected:
+            srSpritesCopyEx(self->spritesRender, &self->disconnectedSprite, x, y, 0, 1.0f, SDL_ALPHA_OPAQUE);
+            break;
+        case NlNetworkIconsDisconnectImpending:
+            srSpritesCopyEx(self->spritesRender, &self->impendingDisconnectWarningSprite, x, y, 0, 1.0f,
+                            SDL_ALPHA_OPAQUE);
+            break;
+        default:
+            break;
     }
 }

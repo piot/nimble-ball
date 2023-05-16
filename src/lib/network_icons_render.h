@@ -16,12 +16,17 @@ typedef struct NlNetworkIconsRender {
     SrSprite droppedDatagramSprite;
     SrSprite authoritativeTimeIntervalWarningSprite;
     SrSprite impendingDisconnectWarningSprite;
+    SrSprite disconnectedSprite;
 } NlNetworkIconsRender;
+
+typedef enum NlNetworkIconsDisconnectInfo {
+    NlNetworkIconsDisconnectInfoNone, NlNetworkIconsDisconnectImpending, NlNetworkIconsDisconnectDisconnected
+} NlNetworkIconsDisconnectInfo;
 
 typedef struct NlNetworkIconsState {
     bool droppedDatagram;
     bool authoritativeTimeIntervalWarning;
-    bool impendingDisconnectWarning;
+    NlNetworkIconsDisconnectInfo disconnectInfo;
 } NlNetworkIconsState;
 
 void nlNetworkIconsRenderInit(NlNetworkIconsRender* self, struct SrSprites* spritesRender, SDL_Texture* texture);
