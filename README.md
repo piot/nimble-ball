@@ -60,3 +60,9 @@ cmake --build .
 * Gameplay: Hold `SPACE` to build up power to shoot. Release `SPACE` to shoot. press `LEFT SHIFT` to do a slide tackle.
 
 The 'half transparent shadow' you see on the avatars, shows the authoritative state. To make it easy to see the difference between authoritative and predicted state.
+
+## Nimble Ball
+
+* Lagometer and network warning icons
+
+![deps screenshot](docs/images/nimble_ball_lagometer.gif)
