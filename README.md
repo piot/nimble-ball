@@ -65,4 +65,4 @@ The 'half transparent shadow' you see on the avatars, shows the authoritative st
 
 * Lagometer and network warning icons
 
-![deps screenshot](docs/images/nimble_ball_lagometer.gif)
+![lagometer](docs/images/nimble_ball_lagometer.gif)
