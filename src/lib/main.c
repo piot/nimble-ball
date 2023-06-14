@@ -111,7 +111,6 @@ static void startHostingOnMultiTransport(NlAppHost* self, NlApp* app)
     serverSetup.maxParticipantCountForEachConnection = 2;
     serverSetup.maxGameStateOctetCount = sizeof(NlGame);
     serverSetup.memory = app->allocator;
-    serverSetup.blobAllocator = app->allocatorWithFree;
     serverSetup.applicationVersion = serverReportTransmuteVmVersion;
     serverSetup.now = monotonicTimeMsNow();
     serverSetup.log = serverLog;
