@@ -7,8 +7,6 @@
 #include "lagometer_render.h"
 #include "network_icons_render.h"
 #include <clog/console.h>
-#include <conclave-client/client.h>
-#include <conclave-client/network_realizer.h>
 #include <imprint/default_setup.h>
 #include <nimble-ball-presentation/audio.h>
 #include <nimble-ball-presentation/render.h>
@@ -19,17 +17,19 @@
 #include <transport-stack/multi.h>
 #include <transport-stack/single.h>
 
-const size_t gameRelayPort = 27003U;
-const char* gameRelayHost = "127.0.0.1";
-const char* gameRelayDevHost = "gamerelay.dev";
+static const size_t gameRelayPort = 27003U;
+static const char* gameRelayHost = "127.0.0.1";
+static const char* gameRelayDevHost = "gamerelay.dev";
 
 clog_config g_clog;
+
+char g_clog_temp_str[CLOG_TEMP_STR_SIZE];
 
 static NlPlayerInput gamepadToPlayerInput(const SrGamepad* pad)
 {
     NlPlayerInput playerInput;
-    playerInput.input.inGameInput.horizontalAxis = pad->horizontalAxis;
-    playerInput.input.inGameInput.verticalAxis = pad->verticalAxis;
+    playerInput.input.inGameInput.horizontalAxis = (int8_t) pad->horizontalAxis;
+    playerInput.input.inGameInput.verticalAxis = (int8_t) pad->verticalAxis;
     uint8_t mask = pad->a ? 0x01 : 0x00 | pad->b ? 0x02 : 0x00;
     playerInput.input.inGameInput.buttons = mask;
     playerInput.inputType = NlPlayerInputTypeInGame;
@@ -81,8 +81,8 @@ typedef struct NlAppClient {
 } NlAppClient;
 
 /// Initializes the nimble server on the previously setup multi transport
-/// @param self
-/// @param app
+/// @param self appHost
+/// @param app Application
 static void startHostingOnMultiTransport(NlAppHost* self, NlApp* app)
 {
     app->phase = NlAppPhaseNetwork;
@@ -134,12 +134,12 @@ static void startHostingOnMultiTransport(NlAppHost* self, NlApp* app)
     app->nimbleServerIsStarted = true;
 }
 
-const int maxLocalPlayerCount = 2;
-const int useLocalPlayerCount = 1;
+static const int maxLocalPlayerCount = 2;
+static const int useLocalPlayerCount = 1;
 
 /// Initializes a nimble engine client on a previously setup single datagram transport
-/// @param self
-/// @param app
+/// @param self app client
+/// @param app application
 static void startJoiningOnClientTransport(NlAppClient* self, NlApp* app)
 {
     CLOG_DEBUG("start joining")
@@ -181,25 +181,19 @@ static void startJoiningOnClientTransport(NlAppClient* self, NlApp* app)
     joinOptions.players[1].localIndex = 42;
     nimbleEngineClientRequestJoin(&self->nimbleEngineClient, joinOptions);
 
-    self->nimbleEngineClient.isHostingLocally = app->nimbleServerIsStarted;
+    // self->nimbleEngineClient.isHostingLocally = app->nimbleServerIsStarted;
 
     CLOG_DEBUG("nimble client is trying to join / rejoin server")
 }
 
 /// Tries to create a room on a conclave transport
 /// @note not implemented yet
-/// @param app
-/// @param host
-/// @return
+/// @param app Application
+/// @param host Host
+/// @return zero
 static int startHostOnline(NlApp* app, NlAppHost* host)
 {
-    if (host->multiTransport.mode == TransportStackModeConclave) {
-        ClvSerializeRoomCreateOptions createRoomOptions;
-        createRoomOptions.name = "New Room";
-        createRoomOptions.maxNumberOfPlayers = 4;
-        createRoomOptions.flags = 0;
-        clvClientRealizeCreateRoom(&host->multiTransport.conclave.conclaveClient, &createRoomOptions);
-    }
+    (void) host;
 
     app->phase = NlAppPhaseNetwork;
     app->frontend.phase = NlFrontendPhaseHostingOnline;
@@ -209,18 +203,12 @@ static int startHostOnline(NlApp* app, NlAppHost* host)
 
 /// Tries to join an existing room on a conclave transport
 /// @note not implemented yet
-/// @param app
-/// @param host
-/// @return
+/// @param app app
+/// @param client appclient
+/// @return zero
 static int startJoinOnline(NlApp* app, NlAppClient* client)
 {
-    if (client->singleTransport.mode == TransportStackModeConclave) {
-        ClvSerializeListRoomsOptions listRoomOptions;
-        listRoomOptions.applicationId = 0;
-        listRoomOptions.maximumCount = 4;
-        clvClientRealizeListRooms(&client->singleTransport.conclave.conclaveClient, &listRoomOptions);
-    }
-
+    (void) client;
     app->phase = NlAppPhaseNetwork;
     app->frontend.phase = NlFrontendPhaseHostingOnline;
 
@@ -229,8 +217,10 @@ static int startJoinOnline(NlApp* app, NlAppClient* client)
 
 /// Initializes a multi datagram transport stack
 /// Used by the server
-/// @param multi
-/// @param mode
+/// @param multi transport stack
+/// @param mode which transport stack to use
+/// @param allocator allocator
+/// @param allocatorWithFree allocator with free
 static void initializeTransportStackMulti(TransportStackMulti* multi, TransportStackMode mode,
                                           struct ImprintAllocator* allocator,
                                           struct ImprintAllocatorWithFree* allocatorWithFree)
@@ -244,10 +234,10 @@ static void initializeTransportStackMulti(TransportStackMulti* multi, TransportS
 
 /// Initializes a single datagram transport stack
 /// Used by the client only
-/// @param single
-/// @param mode
-/// @param allocator
-/// @param allocatorWithFree
+/// @param single single transport stack
+/// @param mode wich mode
+/// @param allocator allocator
+/// @param allocatorWithFree allocatorWithFree
 static void initializeTransportStackSingle(TransportStackSingle* single, TransportStackMode mode,
                                            struct ImprintAllocator* allocator,
                                            struct ImprintAllocatorWithFree* allocatorWithFree)
@@ -292,6 +282,10 @@ static void updateFrontendInIdle(NlApp* app, NlAppHost* host, NlAppClient* clien
             startJoiningOnClientTransport(client, app);
             break;
         case NlFrontendMenuSelectHostOnline:
+        case NlFrontendMenuSelectJoinOnline:
+            break;
+            /*
+        case NlFrontendMenuSelectHostOnline:
             CLOG_DEBUG("Host Online")
             initializeConnectMultiAndHost(app, host, gameRelayDevHost, gameRelayPort, TransportStackModeConclave,
                                           app->allocator, app->allocatorWithFree);
@@ -309,62 +303,9 @@ static void updateFrontendInIdle(NlApp* app, NlAppHost* host, NlAppClient* clien
             startJoiningOnClientTransport(client, app);
             startJoinOnline(app, client);
             break;
+             */
         case NlFrontendMenuSelectUnknown:
-        default:
             break;
-    }
-}
-
-/// Not implemented yet
-/// @param app
-/// @param host
-/// @param client
-static void updateConclaveClient(NlApp* app, NlAppHost* host, NlAppClient* client)
-{
-    ClvClientRealize* conclaveForClient = &client->singleTransport.conclave.conclaveClient;
-    /*
-    if (conclaveForClient->state == ClvClientRealizeStateCreateRoom && !app->nimbleServerIsStarted) {
-        startHostingOnMultiTransport(host, app);
-        startJoiningOnClientTransport(client, app);
-    }
-     */
-
-    if (conclaveForClient->state == ClvClientRealizeStateListRoomsDone) {
-        ClvSerializeRoomJoinOptions joinRoomOptions;
-        if (conclaveForClient->client.listRoomsResponseOptions.roomInfoCount == 0) {
-            CLOG_C_SOFT_ERROR(&client->log, "no rooms found")
-        } else {
-            const ClvSerializeRoomInfo* firstRoomInfo = &conclaveForClient->client.listRoomsResponseOptions
-                                                             .roomInfos[0];
-            CLOG_C_INFO(&client->log, "joining first room found %08lX '%s'", firstRoomInfo->roomId,
-                        firstRoomInfo->roomName)
-            joinRoomOptions.roomIdToJoin = firstRoomInfo->roomId;
-            clvClientRealizeJoinRoom(conclaveForClient, &joinRoomOptions);
-        }
-    }
-    if (conclaveForClient->state == ClvClientRealizeStateJoinRoom) {
-        // Has joined a room!
-        app->frontend.phase = NlFrontendPhaseInGame;
-    }
-
-    if (app->frontend.phase == NlFrontendPhaseHostingOnline && conclaveForClient->state == ClvClientStatePlaying) {
-        app->frontend.phase = NlFrontendPhaseInGame;
-    }
-}
-
-/// Not implemented yet
-/// @param app
-/// @param host
-/// @param client
-static void updateConclaveServer(NlApp* app, NlAppHost* host, NlAppClient* client)
-{
-    ClvClientRealize* conclaveForHost = &host->multiTransport.conclave.conclaveClient;
-
-    if (app->frontend.phase == NlFrontendPhaseHostingOnline &&
-        conclaveForHost->state == ClvClientRealizeStateCreateRoom) {
-        // We have created a room
-        CLOG_C_INFO(&client->log, "Host: Room created is done, switch to in game view")
-        app->frontend.phase = NlFrontendPhaseInGame;
     }
 }
 
@@ -387,7 +328,7 @@ static void addPredictedInput(NlAppClient* client)
         if (simulationPlayer != 0 && simulationPlayer->phase == NlPlayerPhaseSelectTeam && renderLocalPlayer != NULL &&
             renderLocalPlayer->selectedTeamIndex != NL_TEAM_UNDEFINED) {
             inputs[i].inputType = NlPlayerInputTypeSelectTeam;
-            inputs[i].input.selectTeam.preferredTeamToJoin = renderLocalPlayer->selectedTeamIndex;
+            inputs[i].input.selectTeam.preferredTeamToJoin = (uint8_t) renderLocalPlayer->selectedTeamIndex;
             CLOG_INFO("sent selected team %d", inputs[i].input.selectTeam.preferredTeamToJoin)
         } else {
             inputs[i] = gamepadToPlayerInput(&client->gamepads[0]);
@@ -436,12 +377,6 @@ static void updateHost(NlAppHost* host, NlAppClient* client)
 static void updateInNetwork(NlApp* app, NlAppHost* host, NlAppClient* client)
 {
     transportStackSingleUpdate(&client->singleTransport);
-    if (client->singleTransport.mode == TransportStackModeConclave) {
-        updateConclaveClient(app, host, client);
-    }
-    if (host->multiTransport.mode == TransportStackModeConclave) {
-        updateConclaveServer(app, host, client);
-    }
 
     if (transportStackSingleIsConnected(&client->singleTransport)) {
         nimbleEngineClientUpdate(&client->nimbleEngineClient);

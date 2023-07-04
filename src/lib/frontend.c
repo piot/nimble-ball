@@ -33,7 +33,7 @@ void nlFrontendHandleInput(NlFrontend* self, SrGamepad* gamepad)
 
     CLOG_VERBOSE("pressed verticalAxis: %d", verticalAxis)
 
-    if ((verticalAxis == 1)) {
+    if (verticalAxis == 1) {
         switch (self->mainMenuSelect) {
             case NlFrontendMenuSelectJoin:
                 break;
@@ -46,6 +46,8 @@ void nlFrontendHandleInput(NlFrontend* self, SrGamepad* gamepad)
             case NlFrontendMenuSelectHostOnline:
                 self->mainMenuSelect = NlFrontendMenuSelectJoinOnline;
                 break;
+            case NlFrontendMenuSelectUnknown:
+                break;
         }
     } else if (verticalAxis == -1) {
         switch (self->mainMenuSelect) {
@@ -57,6 +59,10 @@ void nlFrontendHandleInput(NlFrontend* self, SrGamepad* gamepad)
                 break;
             case NlFrontendMenuSelectJoinOnline:
                 self->mainMenuSelect = NlFrontendMenuSelectHostOnline;
+                break;
+            case NlFrontendMenuSelectUnknown:
+                break;
+            case NlFrontendMenuSelectHostOnline:
                 break;
         }
     }

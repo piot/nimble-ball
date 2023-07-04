@@ -75,7 +75,7 @@ void nlNetworkIconsRenderUpdate(NlNetworkIconsRender* self, NlNetworkIconsState 
             srSpritesCopyEx(self->spritesRender, &self->impendingDisconnectWarningSprite, x, y, 0, 1.0f,
                             SDL_ALPHA_OPAQUE);
             break;
-        default:
+        case NlNetworkIconsDisconnectInfoNone:
             break;
     }
 }

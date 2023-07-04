@@ -50,5 +50,7 @@ void nlFrontendRenderUpdate(NlFrontendRender* self, const NlFrontend* frontend)
             break;
         case NlFrontendPhaseHosting:
             break;
+        case NlFrontendPhaseHostingOnline:
+            break;
     }
 }

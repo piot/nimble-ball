@@ -1,96 +1,126 @@
-cmake_minimum_required(VERSION 3.17)
-project(nimble_ball C)
-
-
+cmake_minimum_required(VERSION 3.16.3)
 
 set(CMAKE_C_STANDARD 99)
-
-if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(isDebug TRUE)
-else ()
-    message("no debug")
-    set(isDebug FALSE)
-endif ()
+set(CMAKE_C_EXTENSIONS false)
 
 
-if (isDebug)
-    message("Debug build detected")
-    add_compile_definitions(CONFIGURATION_DEBUG TYRAN_CONFIGURATION_DEBUG)
-    set(CONFIGURATION_DEBUG 1)
-endif ()
+# --- Detect CMake build type, compiler and operating system ---
+
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  message("detected debug build")
+  set(isDebug TRUE)
+else()
+  message("detected release build")
+  set(isDebug FALSE)
+endif()
 
 
-set(DEPS ../../deps/)
+if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+  set(COMPILER_NAME "clang")
+  set(COMPILER_CLANG 1)
+elseif(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+  set(COMPILER_NAME "gcc")
+  set(COMPILER_GCC 1)
+elseif(CMAKE_C_COMPILER_ID STREQUAL "MSVC")
+  set(COMPILER_NAME "msvc")
+  set(COMPILER_MSVC 1)
+endif()
+
+message("detected compiler: '${CMAKE_C_COMPILER_ID}' (${COMPILER_NAME})")
+
+set(useSanitizers false)
+
+if(useSanitizers)
+  message("using sanitizers")
+  set(sanitizers "-fsanitize=address")
+endif()
 
 
-file(GLOB_RECURSE deps_src FOLLOW_SYMLINKS
-        "${DEPS}*/*/src/lib/*.c"
-        "${DEPS}*/*/src/platform/posix/*.c"
-        )
+# --- Library ---
 
-file(GLOB src FOLLOW_SYMLINKS
-        "*.c"
-        )
 
-message("something ${example_src}")
+file(GLOB lib_src FOLLOW_SYMLINKS "./*.c")
 
-add_executable(nimble_ball
-        ${src}
-        ${deps_src}
-        )
 
-find_package(SDL2 REQUIRED COMPONENTS SDL2)
-find_package(SDL2_image REQUIRED COMPONENTS SDL2_image>=2.0.0)
-find_package(SDL2_ttf REQUIRED COMPONENTS SDL2_ttf>=2.20.0)
-find_package(SDL2_mixer REQUIRED COMPONENTS SDL2_mixer>=2.0.0)
-target_link_libraries(nimble_ball PUBLIC SDL2::SDL2 SDL2_image::SDL2_image SDL2_ttf::SDL2_ttf SDL2_mixer::SDL2_mixer)
+add_executable(nimble-ball ${lib_src})
 
-if (WIN32)
-else ()
-    target_link_libraries(nimble_ball PUBLIC m)
-endif (WIN32)
 
-target_compile_options(nimble_ball PRIVATE -Wall -Wextra -Wshadow -Wstrict-aliasing -ansi -pedantic -Wno-declaration-after-statement -Wno-extra-semi-stmt -Wno-undef -Wno-unused-variable -Wno-unused-parameter -Wno-padded -Werror=implicit-function-declaration -Werror=incompatible-pointer-types -Werror=missing-prototypes -Werror=int-conversion -Werror=return-type -Werror=incompatible-function-pointer-types) # -Werror=incompatible-pointer-types-discards-qualifiers
-if (COMPILER_CLANG)
-    target_compile_options(nimble_ball PRIVATE -Wmost -Weverything -Werror=missing-variable-declarations)
-endif ()
+if(APPLE)
+  target_compile_definitions(nimble-ball PRIVATE TORNADO_OS_MACOS)
+  set(OS_MACOS 1)
+elseif(UNIX)
+  target_compile_definitions(nimble-ball PRIVATE TORNADO_OS_LINUX)
+  set(OS_LINUX 1)
+elseif(WIN32)
+  target_compile_definitions(nimble-ball PRIVATE TORNADO_OS_WINDOWS)
+  set(OS_WINDOWS 1)
+endif()
 
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/clog/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/tiny-libc/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/transmute-c/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/sdl-render/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/rectify-c/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/imprint/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/nimble-steps-serialize-c/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/nimble-steps-c/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/assent-c/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/seer-c/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/flood-c/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/discoid-c/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/udp-server-c/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/udp-client-c/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/hazy-c/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/basal-c/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/monotonic-time-c/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/datagram-transport-c/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/nimble-ball-simulation/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/nimble-ball-presentation/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/nimble-serialize-c/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/ordered-datagram-c/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/blob-stream/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/stats-c/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/bit-array/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/nimble-server-lib/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/nimble-client-c/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/conclave-client-c/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/conclave-serialize-c/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/transport-stack/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/nimble-engine-client/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/secure-random-c/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/udp-server-connections/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/udp-connections-serialize/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/udp-connections-client-c/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/lagometer-c/src/include)
-target_include_directories(nimble_ball PRIVATE ${DEPS}piot/time-tick-c/src/include)
+if(isDebug)
+  message("Setting definitions based on debug")
+  target_compile_definitions(nimble-ball PRIVATE CONFIGURATION_DEBUG)
+endif()
 
-target_include_directories(nimble_ball PRIVATE ../include)
+
+if(OS_LINUX)
+  message("Linux Detected!")
+elseif(OS_MACOS)
+  message("MacOS detected!")
+elseif(OS_WINDOWS)
+  message("Windows detected!")
+endif()
+
+target_include_directories(nimble-ball PUBLIC ../include)
+
+if(COMPILER_CLANG)
+  target_compile_options(
+    nimble-ball
+    PRIVATE -Weverything
+            -Werror
+            -Wno-padded # the order of the fields in struct can matter (ABI)
+            -Wno-declaration-after-statement # must be bug in clang? shows up
+                                             # even if std=c99
+            -Wno-unsafe-buffer-usage # unclear why it fails on clang-16
+            -Wno-unknown-warning-option # support newer clang versions, e.g. clang-16
+            -Wno-disabled-macro-expansion # bug in emscripten compiler?
+            -Wno-poison-system-directories # might be bug in emscripten compiler?
+            -Wno-documentation
+            -Wno-unused-variable
+            -Wno-unused-function
+            ${sanitizers})
+elseif(COMPILER_GCC)
+target_compile_options(
+    nimble-ball
+    PRIVATE -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-padded # the order of the fields in struct can matter (ABI)
+            ${sanitizers})
+elseif(COMPILER_MSVC)
+  target_compile_options(
+    nimble-ball
+    PRIVATE /Wall
+            /WX
+            # /F 5000000 # stack size
+            /wd4820 # bytes padding added after data member
+            /wd4668 # bug in winioctl.h (is not defined as a preprocessor macro, replacing with '0' for '#if/#elif')
+            /wd5045 # Compiler will insert Spectre mitigation for memory load if /Qspectre switch specified
+            /wd4005 # Bug in ntstatus.h (macro redefinition)
+          )
+else()
+  target_compile_options(nimble-ball PRIVATE -Wall)
+endif()
+
+
+target_link_libraries(nimble-ball PUBLIC nimble PUBLIC nimble-ball-simulation PUBLIC nimble-ball-presentation PUBLIC udp-server-connections PUBLIC udp-connections-client PUBLIC transport-stack)
+
+
+if(useSanitizers)
+  target_link_libraries(nimble-ball PRIVATE ${sanitizers})
+endif()
+
+if(NOT isDebug)
+  message("optimize!")
+  target_compile_options(nimble-ball PRIVATE -O3)
+endif()

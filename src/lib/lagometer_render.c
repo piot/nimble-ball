@@ -38,7 +38,7 @@ void nlLagometerRenderUpdate(NlLagometerRender* self, const Lagometer* lagometer
 {
     const int barWidth = 2;
     const int fullBarHeight = 200;
-    int fullLagometerWidth = lagometer->packets.capacity * barWidth;
+    int fullLagometerWidth = (int) lagometer->packets.capacity * barWidth;
     int xOffset = self->rectsRender->width - fullLagometerWidth - 20;
     const int maxLatencyMs = 270;
     const float factor = (float) fullBarHeight / (float) maxLatencyMs;
@@ -52,10 +52,10 @@ void nlLagometerRenderUpdate(NlLagometerRender* self, const Lagometer* lagometer
     for (size_t i = 0U; i < lagometer->packets.count; ++i) {
         size_t index = (lagometer->packets.readIndex + i) % lagometer->packets.capacity;
         const LagometerPacket* packet = &lagometer->packets.packets[index];
-        int x = i * barWidth + xOffset;
+        int x = (int) i * barWidth + xOffset;
         int y = yOffset - fullBarHeight;
 
-        int latencyHeight = (float) packet->latencyMs * factor;
+        int latencyHeight = (int) ((float) packet->latencyMs * factor);
         SDL_Color color = self->receivedColor;
         if (packet->status == LagometerPacketStatusDropped) {
             latencyHeight = fullBarHeight;
