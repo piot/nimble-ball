@@ -113,7 +113,7 @@ else()
 endif()
 
 
-target_link_libraries(nimble-ball PUBLIC nimble PUBLIC nimble-ball-simulation PUBLIC nimble-ball-presentation PUBLIC udp-server-connections PUBLIC udp-connections-client PUBLIC transport-stack)
+target_link_libraries(nimble-ball PUBLIC nimble-ball-simulation PUBLIC nimble-ball-presentation PUBLIC nimble PUBLIC transport-stack)
 
 
 if(useSanitizers)
