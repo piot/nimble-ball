@@ -19,7 +19,7 @@
 
 static const size_t gameRelayPort = 27003U;
 static const char* gameRelayHost = "127.0.0.1";
-static const char* gameRelayDevHost = "gamerelay.dev";
+// static const char* gameRelayDevHost = "gamerelay.dev";
 
 clog_config g_clog;
 
@@ -186,6 +186,7 @@ static void startJoiningOnClientTransport(NlAppClient* self, NlApp* app)
     CLOG_DEBUG("nimble client is trying to join / rejoin server")
 }
 
+/*
 /// Tries to create a room on a conclave transport
 /// @note not implemented yet
 /// @param app Application
@@ -214,6 +215,8 @@ static int startJoinOnline(NlApp* app, NlAppClient* client)
 
     return 0;
 }
+*/
+
 
 /// Initializes a multi datagram transport stack
 /// Used by the server
@@ -269,7 +272,7 @@ static void updateFrontendInIdle(NlApp* app, NlAppHost* host, NlAppClient* clien
             CLOG_DEBUG("Join a LAN game")
             initializeTransportStackSingle(&client->singleTransport, TransportStackModeLocalUdp, app->allocator,
                                            app->allocatorWithFree);
-            transportStackSingleConnect(&client->singleTransport, gameRelayHost, gameRelayPort);
+            transportStackSingleConnect(&client->singleTransport, gameRelayHost, gameRelayPort, 0);
             startJoiningOnClientTransport(client, app);
             break;
         case NlFrontendMenuSelectHost:
@@ -278,7 +281,7 @@ static void updateFrontendInIdle(NlApp* app, NlAppHost* host, NlAppClient* clien
                                           app->allocatorWithFree);
             initializeTransportStackSingle(&client->singleTransport, TransportStackModeLocalUdp, app->allocator,
                                            app->allocatorWithFree);
-            transportStackSingleConnect(&client->singleTransport, gameRelayHost, gameRelayPort);
+            transportStackSingleConnect(&client->singleTransport, gameRelayHost, gameRelayPort, 0);
             startJoiningOnClientTransport(client, app);
             break;
         case NlFrontendMenuSelectHostOnline:
@@ -352,7 +355,7 @@ static void setGameStateToHost(NlAppHost* host, NlAppClient* client)
 {
     StepId outStepId;
     TransmuteState authoritativeState = assentGetState(&client->nimbleEngineClient.rectify.authoritative, &outStepId);
-    CLOG_ASSERT(authoritativeState.octetSize == sizeof(NlGame), "illegal authoritative state");
+    CLOG_ASSERT(authoritativeState.octetSize == sizeof(NlGame), "illegal authoritative state")
     nimbleServerSetGameState(&host->nimbleServer, authoritativeState.state, authoritativeState.octetSize, outStepId);
 }
 
@@ -495,7 +498,7 @@ static bool pollInputAndHandleSpecialButtons(NlAppClient* client)
 
     if (!client->functionKeysPressedLast.functionKeys[SR_KEY_F3] && client->functionKeys.functionKeys[SR_KEY_F3]) {
         TransportStackInternetSimulationMode
-            newMode = (TransportStackInternetSimulationMode) (((int) client->singleTransport.conclave
+            newMode = (TransportStackInternetSimulationMode) (((int) client->singleTransport.lowerLevel
                                                                    .internetSimulationMode +
                                                                1) %
                                                               3);
@@ -505,7 +508,7 @@ static bool pollInputAndHandleSpecialButtons(NlAppClient* client)
     }
 
     if (!client->functionKeysPressedLast.functionKeys[SR_KEY_F4] && client->functionKeys.functionKeys[SR_KEY_F4]) {
-        hazyDatagramTransportDebugDiscardIncoming(&client->singleTransport.conclave.hazyTransport);
+        hazyDatagramTransportDebugDiscardIncoming(&client->singleTransport.lowerLevel.hazyTransport);
         CLOG_NOTICE("stopping incoming hazy transport");
     }
 
