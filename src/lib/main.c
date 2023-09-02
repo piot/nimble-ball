@@ -272,7 +272,7 @@ static void updateFrontendInIdle(NlApp* app, NlAppHost* host, NlAppClient* clien
             CLOG_DEBUG("Join a LAN game")
             initializeTransportStackSingle(&client->singleTransport, TransportStackModeLocalUdp, app->allocator,
                                            app->allocatorWithFree);
-            transportStackSingleConnect(&client->singleTransport, gameRelayHost, gameRelayPort, 0);
+            transportStackSingleConnect(&client->singleTransport, gameRelayHost, gameRelayPort);
             startJoiningOnClientTransport(client, app);
             break;
         case NlFrontendMenuSelectHost:
@@ -281,7 +281,7 @@ static void updateFrontendInIdle(NlApp* app, NlAppHost* host, NlAppClient* clien
                                           app->allocatorWithFree);
             initializeTransportStackSingle(&client->singleTransport, TransportStackModeLocalUdp, app->allocator,
                                            app->allocatorWithFree);
-            transportStackSingleConnect(&client->singleTransport, gameRelayHost, gameRelayPort, 0);
+            transportStackSingleConnect(&client->singleTransport, gameRelayHost, gameRelayPort);
             startJoiningOnClientTransport(client, app);
             break;
         case NlFrontendMenuSelectHostOnline:
@@ -509,7 +509,7 @@ static bool pollInputAndHandleSpecialButtons(NlAppClient* client)
 
     if (!client->functionKeysPressedLast.functionKeys[SR_KEY_F4] && client->functionKeys.functionKeys[SR_KEY_F4]) {
         hazyDatagramTransportDebugDiscardIncoming(&client->singleTransport.lowerLevel.hazyTransport);
-        CLOG_NOTICE("stopping incoming hazy transport");
+        CLOG_NOTICE("stopping incoming hazy transport")
     }
 
     client->functionKeysPressedLast = client->functionKeys;
@@ -523,7 +523,7 @@ int main(int argc, char* argv[])
     (void) argv;
 
     g_clog.log = clog_console;
-    g_clog.level = CLOG_TYPE_DEBUG;
+    g_clog.level = CLOG_TYPE_VERBOSE;
 
     CLOG_VERBOSE("Nimble Ball start!")
 
