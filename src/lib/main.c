@@ -78,6 +78,8 @@ typedef struct NlAppClient {
     NimbleEngineClient nimbleEngineClient;
     Clog log;
     SrFunctionKeys functionKeysPressedLast;
+    bool hasSavedSecret;
+    NimbleSerializeParticipantConnectionSecret savedSecret;
 } NlAppClient;
 
 /// Initializes the nimble server on the previously setup multi transport
@@ -109,6 +111,7 @@ static void startHostingOnMultiTransport(NlAppHost* self, NlApp* app)
     serverSetup.maxParticipantCount = maxParticipantCount;
     serverSetup.maxConnectionCount = maxConnectionCount;
     serverSetup.maxParticipantCountForEachConnection = 2;
+    serverSetup.maxWaitingForReconnectTicks = 62 * 20;
     serverSetup.maxGameStateOctetCount = sizeof(NlGame);
     serverSetup.memory = app->allocator;
     serverSetup.applicationVersion = serverReportTransmuteVmVersion;
@@ -179,6 +182,8 @@ static void startJoiningOnClientTransport(NlAppClient* self, NlApp* app)
     joinOptions.playerCount = useLocalPlayerCount;
     joinOptions.players[0].localIndex = 99;
     joinOptions.players[1].localIndex = 42;
+    joinOptions.useSecret = self->hasSavedSecret;
+    joinOptions.secret = self->savedSecret;
     nimbleEngineClientRequestJoin(&self->nimbleEngineClient, joinOptions);
 
     // self->nimbleEngineClient.isHostingLocally = app->nimbleServerIsStarted;
@@ -216,7 +221,6 @@ static int startJoinOnline(NlApp* app, NlAppClient* client)
     return 0;
 }
 */
-
 
 /// Initializes a multi datagram transport stack
 /// Used by the server
@@ -310,6 +314,7 @@ static void updateFrontendInIdle(NlApp* app, NlAppHost* host, NlAppClient* clien
         case NlFrontendMenuSelectUnknown:
             break;
     }
+    app->frontend.mainMenuSelected = NlFrontendMenuSelectUnknown;
 }
 
 /// Adds predicted input to the nimble engine client
@@ -339,6 +344,7 @@ static void addPredictedInput(NlAppClient* client)
         participantInputs[i].input = &inputs[i];
         participantInputs[i].octetSize = sizeof(inputs[i]);
         participantInputs[i].participantId = participantId[i];
+        participantInputs[i].inputType = TransmuteParticipantInputTypeNormal;
     }
 
     TransmuteInput transmuteInput;
@@ -391,10 +397,24 @@ static void updateInNetwork(NlApp* app, NlAppHost* host, NlAppClient* client)
         client->nimbleEngineClient.nimbleClient.client.localParticipantCount > 0 &&
         nimbleEngineClientMustAddPredictedInput(&client->nimbleEngineClient)) {
         addPredictedInput(client);
+        if (app->frontend.phase == NlFrontendPhaseJoining) {
+            app->frontend.phase = NlFrontendPhaseInGame;
+            client->savedSecret = client->nimbleEngineClient.nimbleClient.client.participantsConnectionSecret;
+            client->hasSavedSecret = true;
+        }
     }
 
     if (app->nimbleServerIsStarted) {
         updateHost(host, client);
+    }
+
+    // Hack to go back to main menu
+    if (client->gamepads[0].menu && app->frontend.phase == NlFrontendPhaseInGame) {
+        app->frontend.phase = NlFrontendPhaseMainMenu;
+        app->phase = NlAppPhaseIdle;
+        app->frontend.mainMenuSelected = NlFrontendMenuSelectUnknown;
+        app->frontend.mainMenuSelect = NlFrontendMenuSelectHost;
+        nimbleEngineClientRequestDisconnect(&client->nimbleEngineClient);
     }
 }
 
@@ -523,7 +543,7 @@ int main(int argc, char* argv[])
     (void) argv;
 
     g_clog.log = clog_console;
-    g_clog.level = CLOG_TYPE_VERBOSE;
+    g_clog.level = CLOG_TYPE_DEBUG;
 
     CLOG_VERBOSE("Nimble Ball start!")
 
@@ -552,6 +572,8 @@ int main(int argc, char* argv[])
 
     // Client Initialization
     NlAppClient client;
+    client.hasSavedSecret = false;
+    client.savedSecret = 0;
     srGamepadInit(&client.gamepads[0]);
     srGamepadInit(&client.gamepads[1]);
     srFunctionKeysInit(&client.functionKeysPressedLast);
