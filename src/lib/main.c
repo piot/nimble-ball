@@ -168,6 +168,7 @@ static void startJoiningOnClientTransport(NlAppClient* self, NlApp* app)
     setup.maximumParticipantCount = 8;
     setup.applicationVersion = clientReportTransmuteVmVersion;
     setup.maxTicksFromAuthoritative = 10U;
+    setup.wantsDebugStream = true;
 
     Clog nimbleEngineClientLog;
     nimbleEngineClientLog.config = &g_clog;
