@@ -21,5 +21,7 @@ target_link_libraries(nimble-ball PUBLIC
   nimble-ball-simulation
   nimble-ball-presentation
   nimble
-  transport-stack)
+  transport-stack
+  -fsanitize=address
+  )
 

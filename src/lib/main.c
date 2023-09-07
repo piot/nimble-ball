@@ -99,7 +99,7 @@ static void startHostingOnMultiTransport(NlAppHost* self, NlApp* app)
     };
 
     const size_t maxConnectionCount = 4U;
-    const size_t maxParticipantCount = maxConnectionCount * 2U;
+    const size_t maxParticipantCount = 2; //maxConnectionCount * 2U;
     const size_t maxSingleParticipantStepOctetCount = sizeof(NlPlayerInput);
 
     Clog serverLog;
@@ -110,10 +110,11 @@ static void startHostingOnMultiTransport(NlAppHost* self, NlApp* app)
     serverSetup.maxSingleParticipantStepOctetCount = maxSingleParticipantStepOctetCount;
     serverSetup.maxParticipantCount = maxParticipantCount;
     serverSetup.maxConnectionCount = maxConnectionCount;
-    serverSetup.maxParticipantCountForEachConnection = 2;
+    serverSetup.maxParticipantCountForEachConnection = 1;
     serverSetup.maxWaitingForReconnectTicks = 62 * 20;
     serverSetup.maxGameStateOctetCount = sizeof(NlGame);
     serverSetup.memory = app->allocator;
+    serverSetup.blobAllocator = app->allocatorWithFree;
     serverSetup.applicationVersion = serverReportTransmuteVmVersion;
     serverSetup.now = monotonicTimeMsNow();
     serverSetup.log = serverLog;
@@ -405,6 +406,10 @@ static void updateInNetwork(NlApp* app, NlAppHost* host, NlAppClient* client)
         }
     }
 
+    if (client->nimbleEngineClient.nimbleClient.client.joinParticipantPhase == NimbleJoiningStateOutOfParticipantSlots) {
+        CLOG_INFO("Out of participant slots!")
+    }
+
     if (app->nimbleServerIsStarted) {
         updateHost(host, client);
     }
@@ -544,7 +549,7 @@ int main(int argc, char* argv[])
     (void) argv;
 
     g_clog.log = clog_console;
-    g_clog.level = CLOG_TYPE_DEBUG;
+    g_clog.level = CLOG_TYPE_VERBOSE;
 
     CLOG_VERBOSE("Nimble Ball start!")
 
