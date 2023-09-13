@@ -485,12 +485,12 @@ static void presentPredictedAndAuthoritativeStatesAndFrontend(const NlApp* app, 
     NlNetworkIconsState iconsState;
     iconsState.authoritativeTimeIntervalWarning = client->nimbleEngineClient.detectedGapInAuthoritativeSteps
                                                       .isOrWasTrue;
-    iconsState.droppedDatagram = client->nimbleEngineClient.nimbleClient.client.droppingDatagramWarning.isOrWasTrue;
+    iconsState.droppedDatagram = client->nimbleEngineClient.nimbleClient.client.quality.droppingDatagramWarning.isOrWasTrue;
     iconsState.disconnectInfo = NlNetworkIconsDisconnectInfoNone;
     if (client->nimbleEngineClient.nimbleClient.state == NimbleClientRealizeStateDisconnected) {
         iconsState.disconnectInfo = NlNetworkIconsDisconnectDisconnected;
     } else {
-        bool impending = client->nimbleEngineClient.nimbleClient.client.impendingDisconnectWarning.isOrWasTrue |
+        bool impending = client->nimbleEngineClient.nimbleClient.client.quality.impendingDisconnectWarning.isOrWasTrue |
                          client->nimbleEngineClient.bigGapInAuthoritativeSteps.isOrWasTrue;
         if (impending) {
             iconsState.disconnectInfo = NlNetworkIconsDisconnectImpending;
@@ -549,7 +549,7 @@ int main(int argc, char* argv[])
     (void) argv;
 
     g_clog.log = clog_console;
-    g_clog.level = CLOG_TYPE_VERBOSE;
+    g_clog.level = CLOG_TYPE_DEBUG;
 
     CLOG_VERBOSE("Nimble Ball start!")
 
