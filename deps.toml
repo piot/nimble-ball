@@ -18,3 +18,7 @@ version = "*"
 [[dependencies]]
 name = "piot/transport-stack"
 version = "*"
+
+[[dependencies]]
+name = "piot/cpu-bound-simulator"
+version = "*"

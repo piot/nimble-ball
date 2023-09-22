@@ -7,6 +7,7 @@
 #include "lagometer_render.h"
 #include "network_icons_render.h"
 #include <clog/console.h>
+#include <cpu-bound-simulator/simulator.h>
 #include <imprint/default_setup.h>
 #include <nimble-ball-presentation/audio.h>
 #include <nimble-ball-presentation/render.h>
@@ -51,6 +52,7 @@ typedef struct NlApp {
     NlSimulationVm predicted;
     NlFrontend frontend;
     bool nimbleServerIsStarted;
+    CpuBoundSimulator cpuBoundSimulator;
 } NlApp;
 
 /// Nimble server and transport stack
@@ -99,7 +101,7 @@ static void startHostingOnMultiTransport(NlAppHost* self, NlApp* app)
     };
 
     const size_t maxConnectionCount = 4U;
-    const size_t maxParticipantCount = 2; //maxConnectionCount * 2U;
+    const size_t maxParticipantCount = 2; // maxConnectionCount * 2U;
     const size_t maxSingleParticipantStepOctetCount = sizeof(NlPlayerInput);
 
     Clog serverLog;
@@ -339,7 +341,8 @@ static void addPredictedInput(NlAppClient* client)
             renderLocalPlayer->selectedTeamIndex != NL_TEAM_UNDEFINED) {
             inputs[i].inputType = NlPlayerInputTypeSelectTeam;
             inputs[i].input.selectTeam.preferredTeamToJoin = (uint8_t) renderLocalPlayer->selectedTeamIndex;
-            CLOG_INFO("sent selected team %d", inputs[i].input.selectTeam.preferredTeamToJoin)
+            tc_snprintf(inputs[i].input.selectTeam.playerName, 32, "player %d", participantId[i]);
+            CLOG_INFO("sent selected team %d '%s' %zu", inputs[i].input.selectTeam.preferredTeamToJoin, inputs[i].input.selectTeam.playerName, sizeof(inputs[i]))
         } else {
             inputs[i] = gamepadToPlayerInput(&client->gamepads[0]);
         }
@@ -387,26 +390,30 @@ static void updateHost(NlAppHost* host, NlAppClient* client)
 /// @param client
 static void updateInNetwork(NlApp* app, NlAppHost* host, NlAppClient* client)
 {
+    cpuBoundSimulatorUpdate(&app->cpuBoundSimulator);
+
     transportStackSingleUpdate(&client->singleTransport);
 
     if (transportStackSingleIsConnected(&client->singleTransport)) {
         nimbleEngineClientUpdate(&client->nimbleEngineClient);
+        if (client->nimbleEngineClient.phase == NimbleEngineClientPhaseSynced &&
+            client->nimbleEngineClient.nimbleClient.client.localParticipantCount > 0 &&
+            nimbleEngineClientMustAddPredictedInput(&client->nimbleEngineClient)) {
+            addPredictedInput(client);
+            if (app->frontend.phase == NlFrontendPhaseJoining) {
+                app->frontend.phase = NlFrontendPhaseInGame;
+                client->savedSecret = client->nimbleEngineClient.nimbleClient.client.participantsConnectionSecret;
+                client->hasSavedSecret = true;
+            }
+        }
+
     } else {
         uint8_t buf[1200];
         datagramTransportReceive(&client->singleTransport.singleTransport, buf, 1200);
     }
-    if (client->nimbleEngineClient.phase == NimbleEngineClientPhaseSynced &&
-        client->nimbleEngineClient.nimbleClient.client.localParticipantCount > 0 &&
-        nimbleEngineClientMustAddPredictedInput(&client->nimbleEngineClient)) {
-        addPredictedInput(client);
-        if (app->frontend.phase == NlFrontendPhaseJoining) {
-            app->frontend.phase = NlFrontendPhaseInGame;
-            client->savedSecret = client->nimbleEngineClient.nimbleClient.client.participantsConnectionSecret;
-            client->hasSavedSecret = true;
-        }
-    }
 
-    if (client->nimbleEngineClient.nimbleClient.client.joinParticipantPhase == NimbleJoiningStateOutOfParticipantSlots) {
+    if (client->nimbleEngineClient.nimbleClient.client.joinParticipantPhase ==
+        NimbleJoiningStateOutOfParticipantSlots) {
         CLOG_INFO("Out of participant slots!")
     }
 
@@ -485,7 +492,8 @@ static void presentPredictedAndAuthoritativeStatesAndFrontend(const NlApp* app, 
     NlNetworkIconsState iconsState;
     iconsState.authoritativeTimeIntervalWarning = client->nimbleEngineClient.detectedGapInAuthoritativeSteps
                                                       .isOrWasTrue;
-    iconsState.droppedDatagram = client->nimbleEngineClient.nimbleClient.client.quality.droppingDatagramWarning.isOrWasTrue;
+    iconsState.droppedDatagram = client->nimbleEngineClient.nimbleClient.client.quality.droppingDatagramWarning
+                                     .isOrWasTrue;
     iconsState.disconnectInfo = NlNetworkIconsDisconnectInfoNone;
     if (client->nimbleEngineClient.nimbleClient.state == NimbleClientRealizeStateDisconnected) {
         iconsState.disconnectInfo = NlNetworkIconsDisconnectDisconnected;
@@ -565,6 +573,12 @@ int main(int argc, char* argv[])
     app.allocatorWithFree = &imprintDefaultSetup.slabAllocator.info;
     app.log.config = &g_clog;
     app.log.constantPrefix = "App";
+
+    CpuBoundSimulatorSetup setup;
+
+    setup.targetTimeStep = 1;
+
+    cpuBoundSimulatorInit(&app.cpuBoundSimulator, &setup);
 
     Clog authoritativeLog;
     authoritativeLog.constantPrefix = "NimbleBallAuth";
